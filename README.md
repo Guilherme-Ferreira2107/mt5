@@ -1,0 +1,1 @@
+Este projeto irá me ajudar a criar indicadores para o mercado financeiro
