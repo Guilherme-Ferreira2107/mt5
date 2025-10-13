@@ -19,22 +19,22 @@ input double Lot = 0.1; // Lote
 
 // Médias Móveis
 input bool apenasCruzamento = false;
-int MA_Periodo_Lento = 20;
-int MA_Periodo_Medio = 50;
-int MA_Periodo_Rapido = 100;
+int MA_Periodo_Rapido = 20;
+input int MA_Periodo_Medio = 50;
+input int MA_Periodo_Lento = 100;
 double Desvio = 4;
 int Deslocamento = 0;
 ENUM_APPLIED_PRICE Preco = PRICE_CLOSE;
 
 // RSI
-input int RSI_Periodo = 3;
-input int RSI_MAX = 90;
-input int RSI_MIN = 10;
+int RSI_Periodo = 3;
+int RSI_MAX = 90;
+int RSI_MIN = 10;
 
 // Horário
-input bool habilitaHorario = false;
-input int horaInicio = 9;
-input int horaFim = 11;
+bool habilitaHorario = false;
+int horaInicio = 9;
+int horaFim = 11;
 
 double ultimoResultado = 0.0;
 bool ultimoTradeLucro = false;
@@ -47,10 +47,10 @@ double superior[], inferior[], rsi_buffer[], fastMA[], slowMA[];
 
 int OnInit()
 {
-    handle = iBands(_Symbol, _Period, Periodo, Deslocamento, Desvio, Preco);
+    handle = iBands(_Symbol, _Period, 20, Deslocamento, Desvio, Preco);
     handleRSI = iRSI(_Symbol, _Period, RSI_Periodo, PRICE_CLOSE);
     handleFastMA = iMA(_Symbol, _Period, MA_Periodo_Medio, 0, MODE_EMA, PRICE_CLOSE);
-    handleSlowMA = iMA(_Symbol, _Period, MA_Periodo_Rapido, 0, MODE_EMA, PRICE_CLOSE);
+    handleSlowMA = iMA(_Symbol, _Period, MA_Periodo_Lento, 0, MODE_EMA, PRICE_CLOSE);
 
     datetime agoraBrasilia = TimeGMT();
     MqlDateTime partesBrasilia;
@@ -204,7 +204,7 @@ void OnTick()
     if (apenasCruzaMedia)
     {
         // any opened Buy position?
-        if (Buy_opened)
+        if (Buy_opened || Sell_opened)
         {
             Alert("We already have a Buy Position!!!");
             return; // Don't open a new Buy Position
@@ -215,11 +215,12 @@ void OnTick()
         mrequest.sl = NormalizeDouble(latest_price.ask - STP * _Point, _Digits); // Stop Loss
         mrequest.tp = NormalizeDouble(latest_price.ask + TKP * _Point, _Digits); // Take Profit
         mrequest.symbol = _Symbol;                                               // currency pair
-        mrequest.volume = ultimoTradeLucro ? Lot : Lot + 0.1;                    // number of lots to trade
-        mrequest.magic = EA_Magic;                                               // Order Magic Number
-        mrequest.type = ORDER_TYPE_BUY;                                          // Buy Order
-        mrequest.type_filling = ORDER_FILLING_IOC;                               // Order execution type
-        mrequest.deviation = 100;                                                // Deviation from current price
+        mrequest.volume = ultimoTradeLucro ? Lot : Lot * 3;                      // number of lots to trade
+        // mrequest.volume = Lot;
+        mrequest.magic = EA_Magic;                 // Order Magic Number
+        mrequest.type = ORDER_TYPE_BUY;            // Buy Order
+        mrequest.type_filling = ORDER_FILLING_IOC; // Order execution type
+        mrequest.deviation = 100;                  // Deviation from current price
         //--- send order
         OrderSend(mrequest, mresult);
         // get the result code
@@ -251,7 +252,7 @@ void OnTick()
     // if (Sell_Condition_2 || Sell_Condition_1) {
     if (apenasCruzaMediaVenda)
     {
-        if (Sell_opened)
+        if (Buy_opened || Sell_opened)
         {
             Alert("We already have a Sell position!!!");
             return;
@@ -262,11 +263,12 @@ void OnTick()
         mrequest.sl = NormalizeDouble(latest_price.bid + STP * _Point, _Digits); // Stop Loss
         mrequest.tp = NormalizeDouble(latest_price.bid - TKP * _Point, _Digits); // Take Profit
         mrequest.symbol = _Symbol;                                               // currency pair
-        mrequest.volume = ultimoTradeLucro ? Lot : Lot + 0.1;                    // number of lots to trade
-        mrequest.magic = EA_Magic;                                               // Order Magic Number
-        mrequest.type = ORDER_TYPE_SELL;                                         // Sell Order
-        mrequest.type_filling = ORDER_FILLING_IOC;                               // Order execution type
-        mrequest.deviation = 100;                                                // Deviation from current price
+        mrequest.volume = ultimoTradeLucro ? Lot : Lot * 3;                      // number of lots to trade
+        // mrequest.volume = Lot;
+        mrequest.magic = EA_Magic;                 // Order Magic Number
+        mrequest.type = ORDER_TYPE_SELL;           // Sell Order
+        mrequest.type_filling = ORDER_FILLING_IOC; // Order execution type
+        mrequest.deviation = 100;                  // Deviation from current price
         //--- send order
         OrderSend(mrequest, mresult);
         // get the result code
