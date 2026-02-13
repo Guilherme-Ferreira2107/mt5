@@ -1,0 +1,99 @@
+//@version=6
+indicator("Duplo Topo/Fundo + Enfraquecimento (RSI Divergência)", overlay=true, max_labels_count=500)
+
+// ===== Inputs =====
+leftBars   = input.int(3,  "Pivot Left Bars", minval=1, maxval=20)
+rightBars  = input.int(3,  "Pivot Right Bars", minval=1, maxval=20)
+
+tolerancePct = input.float(0.25, "Tolerância do duplo (%)", minval=0.05, step=0.05)
+// Ex.: 0.25% significa que o 2º topo/fundo pode estar até 0.25% distante do 1º
+
+minBarsBetween = input.int(5,  "Mín. barras entre os pivôs", minval=1, maxval=500)
+maxBarsBetween = input.int(60, "Máx. barras entre os pivôs", minval=2, maxval=2000)
+
+rsiLen   = input.int(14, "RSI Length", minval=2, maxval=100)
+useWicks = input.bool(true, "Comparar com pavio (high/low) ao invés de close")
+
+// ===== Series =====
+rsi = ta.rsi(close, rsiLen)
+
+priceHigh = useWicks ? high : close
+priceLow  = useWicks ? low  : close
+
+ph = ta.pivothigh(priceHigh, leftBars, rightBars) // retorna valor do pivô ou na
+pl = ta.pivotlow(priceLow,  leftBars, rightBars)
+
+// Como pivô só “confirma” depois de rightBars, a barra real do pivô é (bar_index - rightBars)
+pivotIndex = bar_index - rightBars
+
+// ===== Helpers =====
+tol(v) => v * tolerancePct / 100.0
+near(a, b) => math.abs(a - b) <= tol(a)
+
+// ===== Estado: últimos 2 pivôs de topo/fundo =====
+var float lastTopPrice = na
+var float prevTopPrice = na
+var float lastTopRsi   = na
+var float prevTopRsi   = na
+var int   lastTopBar   = na
+var int   prevTopBar   = na
+
+var float lastBotPrice = na
+var float prevBotPrice = na
+var float lastBotRsi   = na
+var float prevBotRsi   = na
+var int   lastBotBar   = na
+var int   prevBotBar   = na
+
+// ===== Atualiza pivôs e checa padrões =====
+doubleTopWeak = false
+doubleBotWeak = false
+
+// --- Topos (bearish) ---
+if not na(ph)
+    // move "last" -> "prev"
+    prevTopPrice := lastTopPrice
+    prevTopRsi   := lastTopRsi
+    prevTopBar   := lastTopBar
+
+    // salva novo "last"
+    lastTopPrice := ph
+    lastTopRsi   := rsi[rightBars]  // RSI na barra do pivô
+    lastTopBar   := pivotIndex
+
+    // checa duplo topo + enfraquecimento (divergência: preço ~igual, RSI menor)
+    barsBetween = (not na(prevTopBar) and not na(lastTopBar)) ? (lastTopBar - prevTopBar) : na
+    isInRange   = not na(barsBetween) and barsBetween >= minBarsBetween and barsBetween <= maxBarsBetween
+
+    isDoubleTop = isInRange and not na(prevTopPrice) and near(lastTopPrice, prevTopPrice)
+    isWeak      = not na(prevTopRsi) and (lastTopRsi < prevTopRsi)
+
+    doubleTopWeak := isDoubleTop and isWeak
+
+    if doubleTopWeak
+        label.new(lastTopBar, lastTopPrice, "Duplo Topo\nRSI ↓ (fraqueza)", style=label.style_label_down, textcolor=color.white, color=color.red)
+
+// --- Fundos (bullish) ---
+if not na(pl)
+    prevBotPrice := lastBotPrice
+    prevBotRsi   := lastBotRsi
+    prevBotBar   := lastBotBar
+
+    lastBotPrice := pl
+    lastBotRsi   := rsi[rightBars]
+    lastBotBar   := pivotIndex
+
+    barsBetween = (not na(prevBotBar) and not na(lastBotBar)) ? (lastBotBar - prevBotBar) : na
+    isInRange   = not na(barsBetween) and barsBetween >= minBarsBetween and barsBetween <= maxBarsBetween
+
+    isDoubleBot = isInRange and not na(prevBotPrice) and near(lastBotPrice, prevBotPrice)
+    isWeak      = not na(prevBotRsi) and (lastBotRsi > prevBotRsi) // divergência altista: RSI sobe no 2º fundo
+
+    doubleBotWeak := isDoubleBot and isWeak
+
+    if doubleBotWeak
+        label.new(lastBotBar, lastBotPrice, "Duplo Fundo\nRSI ↑ (fraqueza)", style=label.style_label_up, textcolor=color.white, color=color.green)
+
+// ===== Alertas =====
+alertcondition(doubleTopWeak, title="Duplo Topo + Fraqueza (RSI divergente)", message="DOUBLE_TOP_WEAK|{{ticker}}|{{interval}}|price={{close}}")
+alertcondition(doubleBotWeak, title="Duplo Fundo + Fraqueza (RSI divergente)", message="DOUBLE_BOTTOM_WEAK|{{ticker}}|{{interval}}|price={{close}}")

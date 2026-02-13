@@ -1,0 +1,69 @@
+{ Indicador combinado:
+  - Filtro: Estocástico lento %K = SlowStochastic(21,9,kaArithmetic)
+      * Só sinaliza se %K >= 85 (sobrecompra) ou %K <= 15 ( sobrevenda )
+  - Padrão Renko 3x3 com pavio:
+      * Venda: 3 altas seguidas de 3 baixas, com pavio no 1º tijolo (mais antigo, idx 5)
+        e sem pavio no 2º e 3º tijolos (idx 4 e 3). Pinta vermelho e escreve "3x3".
+      * Compra: 3 baixas seguidas de 3 altas, com a mesma regra de pavios. Pinta verde e escreve "3x3". }
+
+var
+   StoK : real;
+
+   Alta0, Alta1, Alta2, Alta3, Alta4, Alta5, Alta6, Alta7 : boolean;
+   Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7 : boolean;
+
+   Pavio5, Pavio4, Pavio3 : boolean;
+   PadraoCompra, PadraoVenda : boolean;
+   PermiteAcima, PermiteAbaixo : boolean;
+
+begin
+   { --- Filtro estocástico --- }
+   StoK := SlowStochastic(21, 9, kaArithmetic);
+   PermiteAcima := (StoK >= 75);
+   PermiteAbaixo := (StoK <= 25);
+
+   Plot(StoK);
+
+   { --- Estado dos últimos 6 tijolos (0 = atual) --- }
+   Alta0  := Fechamento    > Abertura;
+   Alta1  := Fechamento[1] > Abertura[1];
+   Alta2  := Fechamento[2] > Abertura[2];
+   Alta3  := Fechamento[3] > Abertura[3];
+   Alta4  := Fechamento[4] > Abertura[4];
+   Alta5  := Fechamento[5] > Abertura[5];
+   Alta6  := Fechamento[6] > Abertura[6];
+   Alta7  := Fechamento[7] > Abertura[7];
+
+   Baixa0 := Fechamento    < Abertura;
+   Baixa1 := Fechamento[1] < Abertura[1];
+   Baixa2 := Fechamento[2] < Abertura[2];
+   Baixa3 := Fechamento[3] < Abertura[3];
+   Baixa4 := Fechamento[4] < Abertura[4];
+   Baixa5 := Fechamento[5] < Abertura[5];
+   Baixa6 := Fechamento[6] < Abertura[6];
+   Baixa7 := Fechamento[7] < Abertura[7];
+
+   { --- Pavio: 1º tijolo (idx 5) precisa; 2º e 3º (idx 4 e 3) não podem ter --- }
+   Pavio5 := (Maxima[5] > Max(Abertura[5], Fechamento[5])) or (Minima[5] < Min(Abertura[5], Fechamento[5]));
+   Pavio4 := (Maxima[4] > Max(Abertura[4], Fechamento[4])) or (Minima[4] < Min(Abertura[4], Fechamento[4]));
+   Pavio3 := (Maxima[3] > Max(Abertura[3], Fechamento[3])) or (Minima[3] < Min(Abertura[3], Fechamento[3]));
+
+   { --- Padrões 3x3 --- }
+   PadraoVenda := Baixa0 and Alta1 and Alta2 and Alta3 and Baixa4 and Baixa5 and Baixa6 and Alta7
+                   and Pavio4;
+
+   PadraoCompra  := Alta0 and Baixa1 and Baixa2 and Baixa3 and Alta4 and Alta5 and Alta6 and Baixa7
+                   and Pavio4;
+
+   if PadraoCompra and PermiteAbaixo then
+   begin
+      PaintBar(clVerde);
+      PlotText("3x3", clLime, 2, 6);
+   end
+   else if PadraoVenda and PermiteAcima then
+   begin
+      PaintBar(clVermelho);
+      PlotText("3x3", clRed, 2, 6);
+   end;
+
+end;

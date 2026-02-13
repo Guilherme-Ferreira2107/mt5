@@ -17,20 +17,9 @@ input int TakeProfit = 300;          // Take profit em pontos
 // Lote
 input double Lot = 0.1;              // Lote base
 
-// Medias moveis e bandas
-input bool apenasCruzamento = false; // true: somente cruzamento das MAs; false: usa bandas/RSI
-input int PeriodoBandas = 20;        // Periodo das bandas de Bollinger
-input int MA_Periodo_Rapido = 20;    // Periodo da MA rapida (atualmente nao usada na logica)
-input int MA_Periodo_Medio = 50;     // Periodo da MA intermediaria (usada como rapida)
-input int MA_Periodo_Lento = 100;    // Periodo da MA lenta
-input double Desvio = 4;             // Desvio das bandas de Bollinger
-input int Deslocamento = 0;          // Deslocamento das bandas
-input ENUM_APPLIED_PRICE Preco = PRICE_CLOSE; // Preco aplicado nas bandas
-
-// RSI
-input int RSI_Periodo = 3;           // Periodo do RSI
-input int RSI_MAX = 90;              // Nivel superior para venda
-input int RSI_MIN = 10;              // Nivel inferior para compra
+// Regras do indicador (Envelopes + MA)
+input int MA_Periodo = 14;           // Periodo da media do envelope
+input double EnvelopeDesvio = 0.15;  // Desvio do envelope em porcentagem
 
 // Horario
 input bool habilitaHorario = false;  // Ativa filtro de horario
@@ -40,28 +29,17 @@ input int horaFim = 11;              // Hora final (0-23, exclusivo)
 double ultimoResultado = 0.0;
 bool ultimoTradeLucro = false;
 
-double p_close;
 int STP, TKP;
-int handle, handleRSI, handleFastMA, handleSlowMA;
-
-double superior[], inferior[], rsi_buffer[], fastMA[], slowMA[];
+int envelopeHandle;
+double envelopeSup[], envelopeInf[];
 
 int OnInit()
 {
-    handle = iBands(_Symbol, _Period, PeriodoBandas, Deslocamento, Desvio, Preco);
-    handleRSI = iRSI(_Symbol, _Period, RSI_Periodo, PRICE_CLOSE);
-    handleFastMA = iMA(_Symbol, _Period, MA_Periodo_Medio, 0, MODE_EMA, PRICE_CLOSE);
-    handleSlowMA = iMA(_Symbol, _Period, MA_Periodo_Lento, 0, MODE_EMA, PRICE_CLOSE);
+    envelopeHandle = iEnvelopes(_Symbol, _Period, MA_Periodo, 0, MODE_SMA, PRICE_CLOSE, EnvelopeDesvio);
 
-    datetime agoraBrasilia = TimeGMT();
-    MqlDateTime partesBrasilia;
-    TimeToStruct(agoraBrasilia, partesBrasilia);
-
-    bool horarioPermitido = (partesBrasilia.hour >= horaInicio && partesBrasilia.hour < horaFim);
-
-    if (handle < 0 || handleRSI < 0 || handleFastMA < 0 || handleSlowMA < 0)
+    if (envelopeHandle < 0)
     {
-        Alert("Error Creating Handles for indicators - error: ", GetLastError(), "!!");
+        Alert("Error creating Envelopes handle - error: ", GetLastError(), "!!");
         return (-1);
     }
 
@@ -79,17 +57,14 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-    IndicatorRelease(handle);
-    IndicatorRelease(handleRSI);
-    IndicatorRelease(handleFastMA);
-    IndicatorRelease(handleSlowMA);
+    IndicatorRelease(envelopeHandle);
 }
 
 void OnTick()
 {
-    if (Bars(_Symbol, _Period) < 60)
+    if (Bars(_Symbol, _Period) < 5)
     {
-        Alert("We have less than 60 bars, EA will now exit!!");
+        Alert("We have less than 5 bars, EA will now exit!!");
         return;
     }
 
@@ -118,11 +93,19 @@ void OnTick()
     if (IsNewBar == false)
         return;
 
+    if (habilitaHorario)
+    {
+        MqlDateTime partesBrasilia;
+        TimeToStruct(TimeCurrent(), partesBrasilia);
+        if (partesBrasilia.hour < horaInicio || partesBrasilia.hour >= horaFim)
+            return;
+    }
+
     //--- Do we have enough bars to work with
     int Mybars = Bars(_Symbol, _Period);
-    if (Mybars < 60) // if total bars is less than 60 bars
+    if (Mybars < 5) // precisamos de pelo menos 4 candles fechados
     {
-        Alert("We have less than 60 bars, EA will now exit!!");
+        Alert("We have less than 5 bars, EA will now exit!!");
         return;
     }
 
@@ -135,11 +118,8 @@ void OnTick()
 
     // the rates arrays
     ArraySetAsSeries(mrate, true);
-    ArraySetAsSeries(superior, true);
-    ArraySetAsSeries(inferior, true);
-    ArraySetAsSeries(rsi_buffer, true);
-    ArraySetAsSeries(fastMA, true);
-    ArraySetAsSeries(slowMA, true);
+    ArraySetAsSeries(envelopeSup, true);
+    ArraySetAsSeries(envelopeInf, true);
 
     if (!SymbolInfoTick(_Symbol, latest_price))
     {
@@ -147,30 +127,16 @@ void OnTick()
         return;
     }
 
-    if (CopyRates(_Symbol, _Period, 0, 3, mrate) < 0)
+    if (CopyRates(_Symbol, _Period, 0, 4, mrate) < 0)
     {
         Alert("Error copying rates/history data - error:", GetLastError(), "!!");
         ResetLastError();
         return;
     }
 
-    if (CopyBuffer(handle, 1, 0, 2, superior) < 0 || CopyBuffer(handle, 2, 0, 2, inferior) < 0)
+    if (CopyBuffer(envelopeHandle, 0, 0, 4, envelopeSup) < 0 || CopyBuffer(envelopeHandle, 1, 0, 4, envelopeInf) < 0)
     {
-        Alert("Error copying ADX indicator Buffers - error:", GetLastError(), "!!");
-        ResetLastError();
-        return;
-    }
-
-    if (CopyBuffer(handleRSI, 0, 0, 2, rsi_buffer) < 0)
-    {
-        Alert("Error copying ADX indicator Buffers - error:", GetLastError(), "!!");
-        ResetLastError();
-        return;
-    }
-
-    if (CopyBuffer(handleFastMA, 0, 0, 3, fastMA) < 0 || CopyBuffer(handleSlowMA, 0, 0, 3, slowMA) < 0)
-    {
-        Alert("Erro ao copiar valores das MAs: ", GetLastError());
+        Alert("Erro ao copiar valores do indicador Envelopes: ", GetLastError());
         ResetLastError();
         return;
     }
@@ -190,19 +156,11 @@ void OnTick()
         }
     }
 
-    p_close = mrate[1].close;
+    bool buySignal = (mrate[2].close < envelopeInf[2] && mrate[1].close > envelopeInf[1] && mrate[3].low < mrate[2].low);
+    bool sellSignal = (mrate[2].close > envelopeSup[2] && mrate[1].close < envelopeSup[1] && mrate[3].high > mrate[2].high);
 
-    double min_anterior = iLow(_Symbol, _Period, 0);
-
-    bool CrossUp = (fastMA[1] < slowMA[1] && fastMA[0] > slowMA[0]); // Cruzamento p/ cima
-    bool Buy_Condition_1 = (min_anterior <= inferior[0]);
-    bool Buy_Condition_2 = (rsi_buffer[1] >= RSI_MAX && rsi_buffer[0] <= RSI_MAX);
-
-    bool apenasCruzaMedia = apenasCruzamento ? CrossUp : Buy_Condition_1 || Buy_Condition_2;
-
-    //--- Putting all together
-    // if (Buy_Condition_2 || Buy_Condition_1) {
-    if (apenasCruzaMedia)
+    // entrada de compra segue a seta verde (seta aparece e operamos na proxima vela)
+    if (buySignal && !sellSignal)
     {
         // any opened Buy position?
         if (Buy_opened || Sell_opened)
@@ -236,22 +194,9 @@ void OnTick()
             return;
         }
     }
-    /*
-        2. Check for a Short/Sell Setup : MA-8 decreasing downwards,
-        previous price close below it, ADX > 22, -DI > +DI
-    */
-    //--- Declare bool type variables to hold our Sell Conditions
-    double max_anterior = iHigh(_Symbol, _Period, 0);
 
-    bool CrossDown = (fastMA[1] > slowMA[1] && fastMA[0] < slowMA[0]); // Cruzamento p/ baixo
-    bool Sell_Condition_1 = (max_anterior >= superior[0]);
-    bool Sell_Condition_2 = (rsi_buffer[1] <= 50 && rsi_buffer[0] >= 50);
-
-    bool apenasCruzaMediaVenda = apenasCruzamento ? CrossDown : (Sell_Condition_1 || Sell_Condition_2);
-
-    //--- Putting all together
-    // if (Sell_Condition_2 || Sell_Condition_1) {
-    if (apenasCruzaMediaVenda)
+    // entrada de venda segue a seta vermelha
+    if (sellSignal && !buySignal)
     {
         if (Buy_opened || Sell_opened)
         {

@@ -1,0 +1,77 @@
+var
+  StoK                                                    : real;
+  Alta0,Alta1,Alta2,Alta3,Alta4,Alta5,Alta6,Alta7         : boolean;
+  Baixa0,Baixa1,Baixa2,Baixa3,Baixa4,Baixa5,Baixa6,Baixa7 : boolean;
+  Pavio5,Pavio4,Pavio3                                    : boolean;
+  PadraoCompra,PadraoVenda                                : boolean;
+  PermiteAcima,PermiteAbaixo                              : boolean;
+  TamanhoTijolo                                           : real;
+  StopLong,AlvoLong                                       : real;
+  StopShort,AlvoShort                                     : real;
+
+begin
+  { Filtro estocástico }
+  StoK := SlowStochastic(21,9,kaArithmetic);
+  PermiteAcima := (StoK >= 80);
+  PermiteAbaixo := (StoK <= 20);
+
+  { Estado dos últimos tijolos (0 = atual) }
+  Alta0 := Fechamento > Abertura;
+  Alta1 := Fechamento[1] > Abertura[1];
+  Alta2 := Fechamento[2] > Abertura[2];
+  Alta3 := Fechamento[3] > Abertura[3];
+  Alta4 := Fechamento[4] > Abertura[4];
+  Alta5 := Fechamento[5] > Abertura[5];
+  Alta6 := Fechamento[6] > Abertura[6];
+  Alta7 := Fechamento[7] > Abertura[7];
+
+  Baixa0 := Fechamento < Abertura;
+  Baixa1 := Fechamento[1] < Abertura[1];
+  Baixa2 := Fechamento[2] < Abertura[2];
+  Baixa3 := Fechamento[3] < Abertura[3];
+  Baixa4 := Fechamento[4] < Abertura[4];
+  Baixa5 := Fechamento[5] < Abertura[5];
+  Baixa6 := Fechamento[6] < Abertura[6];
+  Baixa7 := Fechamento[7] < Abertura[7];
+  
+  { Pavio: 1º tijolo (idx 5) precisa; 2º e 3º (idx 4 e 3) não podem ter }
+  Pavio5 := (Maxima[5] > Max(Abertura[5],Fechamento[5])) or (Minima[5] < Min(Abertura[5],Fechamento[5]));
+  Pavio4 := (Maxima[4] > Max(Abertura[4],Fechamento[4])) or (Minima[4] < Min(Abertura[4],Fechamento[4]));
+  Pavio3 := (Maxima[3] > Max(Abertura[3],Fechamento[3])) or (Minima[3] < Min(Abertura[3],Fechamento[3]));
+  
+  { Padrões 3x3 }
+  PadraoVenda := Baixa0 and Alta1 and Alta2 and Alta3 and Baixa4 and Baixa5 and Baixa6 and Alta7;
+  PadraoCompra := Alta0 and Baixa1 and Baixa2 and Baixa3 and Alta4 and Alta5 and Alta6 and Baixa7;
+  
+  { Tamanho do tijolo (corpo do tijolo atual) }
+  TamanhoTijolo := Abs(Fechamento - Abertura);
+  
+  if (IsBought) then
+    begin
+      StopLong := Price - (TamanhoTijolo * 3.5);
+      AlvoLong := Price + (TamanhoTijolo * 6);
+      SellToCoverStop(StopLong);
+      SellToCoverLimit(AlvoLong);
+    end
+  else if (IsSold) then
+    begin
+      StopShort := Price + (TamanhoTijolo * 3.5);
+      AlvoShort := Price - (TamanhoTijolo * 6);
+      BuyToCoverStop(StopShort);
+      BuyToCoverLimit(AlvoShort);
+    end;
+  
+  { Entradas e saídas }
+  if ( not IsBought) and ( not IsSold) and PadraoCompra and PermiteAbaixo then
+    begin
+      BuyAtMarket;
+      PaintBar(clVerde);
+      PlotText("3x3",clLime,2,6);
+    end
+  else if ( not IsBought) and ( not IsSold) and PadraoVenda and PermiteAcima then
+    begin
+      SellShortAtMarket;
+      PaintBar(clVermelho);
+      PlotText("3x3",clRed,2,6);
+    end;
+end;

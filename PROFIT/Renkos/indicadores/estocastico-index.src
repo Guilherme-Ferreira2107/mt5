@@ -1,0 +1,15 @@
+var
+   StoK : real;
+   PermiteAcima, PermiteAbaixo : boolean;
+
+begin
+   StoK := SlowStochastic(21, 9, kaArithmetic);
+   PermiteAcima := StoK >= 75;
+   PermiteAbaixo := StoK <= 25;
+
+   if PermiteAcima then
+      PaintBar(clVermelho)
+   else if
+      if PermiteAbaixo then
+         PaintBar(clVerde);
+end;
