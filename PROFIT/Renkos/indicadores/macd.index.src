@@ -1,0 +1,59 @@
+Parametro
+  PeriodoRapido(12);
+  PeriodoLento(26);
+  PeriodoSinal(9);
+  PeriodoPivotMACD(5);
+
+var
+  { --- MACD --- }
+  MacdLinha, MacdSinal, MacdHist : real;
+
+  { --- Pivots no MACD (histograma) --- }
+  MacdPivot : real;
+  macdTopo1, macdTopo2, macdFundo1, macdFundo2 : real;
+
+begin
+  { =========================================================
+    1) MACD sobre o preco do Renko (Fechamento)
+    ========================================================= }
+  MacdLinha := MediaExp(PeriodoRapido, Fechamento) - MediaExp(PeriodoLento, Fechamento);
+  MacdSinal := MediaExp(PeriodoSinal, MacdLinha);
+  MacdHist  := MacdLinha - MacdSinal;
+
+  { =========================================================
+    2) Topos e fundos no MACD (usando o histograma)
+    ========================================================= }
+  MacdPivot := TopBottomDetector(PeriodoPivotMACD);
+
+  { carrega valores anteriores }
+  macdTopo1  := macdTopo1[1];
+  macdTopo2  := macdTopo2[1];
+  macdFundo1 := macdFundo1[1];
+  macdFundo2 := macdFundo2[1];
+
+  { novo topo confirmado }
+  if (MacdPivot <> 0) and (MacdPivot = Maxima) then
+  begin
+    macdTopo1 := macdTopo2;
+    macdTopo2 := MacdHist;
+  end;
+
+  { novo fundo confirmado }
+  if (MacdPivot <> 0) and (MacdPivot = Minima) then
+  begin
+    macdFundo1 := macdFundo2;
+    macdFundo2 := MacdHist;
+  end;
+
+  { evita linha ligando niveis antigos ao trocar topo/fundo }
+  if macdTopo2 <> macdTopo2[1] then NoPlot(2);
+  if macdFundo2 <> macdFundo2[1] then NoPlot(3);
+
+  { =========================================================
+    3) Plots
+    ========================================================= }
+  Plot(MacdHist);      { histograma do MACD }
+  Plot2(macdTopo2);    { ultimo topo confirmado }
+  Plot3(macdFundo2);   { ultimo fundo confirmado }
+
+end;
