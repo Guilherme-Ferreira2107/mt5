@@ -1,64 +1,32 @@
 Parametro
-  Stop(4.5);
-  PeriodoMedia1(34);
-  PeriodoMedia2(72);
-  PeriodoMedia3(250);
   PeriodoToposFundos(5);
+  
+  ExibirTudo(1);
+  ExibirToposFundos(1);
 
 var
   { --- Indicadores / zonas --- }
-  ToposFundos, StoK, Mm1, Mm2, Mm3 : real;
+  ToposFundos : real;
 
   { --- Estrutura (topos e fundos) --- }
   topo1, topo2, fundo1, fundo2 : real;
-  UpTrend, DownTrend : boolean;
-
-  { --- Tijolo / stop --- }
-  TamanhoTijolo, StopCompra, StopVenda : real;
 
   { --- Cores / estado --- }
   corAtual : integer;
 
-  { --- Candle state (0 = atual) --- }
-  Alta0,  Alta1,  Alta2,  Alta3,  Alta4,  Alta5,  Alta6,  Alta7  : boolean;
-  Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7 : boolean;
-
-  { --- Pavio (usado em regras futuras, por enquanto não entra no padrão 3x3) --- }
-  Pavio5, Pavio4, Pavio3 : boolean;
-
   { --- Filtros --- }
-  HabilitaStokVenda, HabilitaStokCompra : boolean;
-  VerificaStocastico : boolean;
-  TemRegiaoCompra, TemRegiaoVenda : boolean;
   TemEstruturaAlta, TemEstruturaBaixa : boolean;
 
-  { --- Padrões --- }
-  PadraoCompra_3x3, PadraoVenda_3x3 : boolean;
+  { --- Condições de entrada --- }
+  MostrarToposFundos : boolean;
 
 begin
   { =========================================================
-    1) Estocástico
-    ========================================================= }
-  StoK := SlowStochastic(21, 9, kaArithmetic);
-
-  { regra atual (mantida) }
-  HabilitaStokVenda  := (StoK < 85);
-  HabilitaStokCompra := (StoK > 15);
-
-  { do jeito que está, isso tende a ficar true quase sempre (15..85) }
-  VerificaStocastico := (HabilitaStokVenda and HabilitaStokCompra);
-
-  { =========================================================
-    2) Médias Móveis
-    ========================================================= }
-  Mm1 := MediaExp(PeriodoMedia1, Fechamento);
-  Mm2 := MediaExp(PeriodoMedia2, Fechamento);
-  Mm3 := MediaExp(PeriodoMedia3, Fechamento);
-
-  { =========================================================
-    3) Topos e Fundos + tendência (estrutura)
+    Topos e Fundos + tendência (estrutura)
     ========================================================= }
   ToposFundos := TopBottomDetector(PeriodoToposFundos);
+  //ToposFundos := TopBottomDetector(PeriodoToposFundos);
+  ToposFundos := Topos_fundos_personalizado(PeriodoToposFundos,false,0,false)
 
   { carrega valores anteriores }
   topo1  := topo1[1];
@@ -80,102 +48,26 @@ begin
     fundo2 := ToposFundos;
   end;
 
-  { limpa plots ao trocar valores }
-  if topo2 <> topo2[1] then NoPlot(1);
-  if fundo2 <> fundo2[1] then NoPlot(2);
-
   { tendência via topos e fundos }
-  UpTrend   := (topo2 > topo1) and (fundo2 > fundo1);
-  DownTrend := (topo2 < topo1) and (fundo2 < fundo1);
+  TemEstruturaAlta  := (topo2 > topo1) and (fundo2 > fundo1);
+  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1);
 
-  TemEstruturaAlta  := UpTrend;
-  TemEstruturaBaixa := DownTrend;
-
-  { debug/visual }
-  Plot(topo2);
-  Plot2(fundo2);
+  { controle de visualizacao }
+  MostrarToposFundos := (ExibirTudo = 1) or (ExibirToposFundos = 1);
 
   { =========================================================
-    4) Estado dos últimos 8 tijolos (0 = atual)
+    Pintura por tendência
     ========================================================= }
-  Alta0 := Fechamento    > Abertura;
-  Alta1 := Fechamento[1] > Abertura[1];
-  Alta2 := Fechamento[2] > Abertura[2];
-  Alta3 := Fechamento[3] > Abertura[3];
-  Alta4 := Fechamento[4] > Abertura[4];
-  Alta5 := Fechamento[5] > Abertura[5];
-  Alta6 := Fechamento[6] > Abertura[6];
-  Alta7 := Fechamento[7] > Abertura[7];
+  if MostrarToposFundos then
+    begin
+      corAtual := clSilver;
 
-  Baixa0 := Fechamento    < Abertura;
-  Baixa1 := Fechamento[1] < Abertura[1];
-  Baixa2 := Fechamento[2] < Abertura[2];
-  Baixa3 := Fechamento[3] < Abertura[3];
-  Baixa4 := Fechamento[4] < Abertura[4];
-  Baixa5 := Fechamento[5] < Abertura[5];
-  Baixa6 := Fechamento[6] < Abertura[6];
-  Baixa7 := Fechamento[7] < Abertura[7];
+      if TemEstruturaAlta then
+        corAtual := clVerde
+      else if TemEstruturaBaixa then
+        corAtual := clVermelho;
 
-  { =========================================================
-    5) Pavio (mantido)
-    ========================================================= }
-  Pavio5 := (Maxima[5] > Max(Abertura[5], Fechamento[5])) or (Minima[5] < Min(Abertura[5], Fechamento[5]));
-  Pavio4 := (Maxima[4] > Max(Abertura[4], Fechamento[4])) or (Minima[4] < Min(Abertura[4], Fechamento[4]));
-  Pavio3 := (Maxima[3] > Max(Abertura[3], Fechamento[3])) or (Minima[3] < Min(Abertura[3], Fechamento[3]));
-
-  { =========================================================
-    6) Região via stop (MM entre preço e stop)
-    ========================================================= }
-  TamanhoTijolo := Abs(Fechamento - Abertura);
-
-  { preços de stop teóricos (mantive sua fórmula) }
-  StopCompra := Abertura - (TamanhoTijolo * Stop);
-  StopVenda  := Abertura + (TamanhoTijolo * Stop);
-
-  { COMPRA: MM entre stop e preço (suporte) }
-  TemRegiaoCompra :=
-    ((Mm1 > StopCompra) and (Fechamento > Mm1)) or
-    ((Mm2 > StopCompra) and (Fechamento > Mm2)) or
-    ((Mm3 > StopCompra) and (Fechamento > Mm3));
-
-  { VENDA: MM entre preço e stop (resistência) }
-  TemRegiaoVenda :=
-    ((Mm1 < StopVenda) and (Abertura < Mm1)) or
-    ((Mm2 < StopVenda) and (Abertura < Mm2)) or
-    ((Mm3 < StopVenda) and (Abertura < Mm3));
-
-  { =========================================================
-    7) Padrões 3x3
-    ========================================================= }
-  PadraoCompra_3x3 :=
-    TemEstruturaAlta and TemRegiaoCompra and VerificaStocastico and
-    Alta0 and Baixa1 and Baixa2 and Baixa3 and
-    Alta4 and Alta5 and Alta6 and Baixa7;
-
-  PadraoVenda_3x3 :=
-    TemEstruturaBaixa and TemRegiaoVenda and VerificaStocastico and
-    Baixa0 and Alta1 and Alta2 and Alta3 and
-    Baixa4 and Baixa5 and Baixa6 and Alta7;
-
-  { =========================================================
-    8) Pintura por tendência
-    ========================================================= }
-  corAtual := clSilver;
-
-  if UpTrend then
-    corAtual := clVerde
-  else if DownTrend then
-    corAtual := clVermelho;
-
-  PaintBar(corAtual);
-
-  { =========================================================
-    9) Sinais
-    ========================================================= }
-  if PadraoCompra_3x3 then
-    PlotText("3x3", clBlue, 0, 8);
-
-  if PadraoVenda_3x3 then
-    PlotText("3x3", clFucsia, 2, 8);
+      PaintBar(corAtual);
+    end;
 
 end;

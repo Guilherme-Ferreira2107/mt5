@@ -13,7 +13,7 @@ Parametro
   ExibirStocastico(1);
   ExibirToposFundos(1);
 
-  Habilita_3x3(1);
+  Habilita_132(1);
 
 var
   { --- Indicadores / zonas --- }
@@ -35,7 +35,7 @@ var
 
 
   { --- Padrões --- }
-  PadraoCompra_3x3, PadraoVenda_3x3 : boolean;
+  PadraoCompra_132, PadraoVenda_132 : boolean;
 
   { --- Filtros --- }
   HabilitaStokVenda, HabilitaStokCompra : boolean;
@@ -93,11 +93,8 @@ begin
   end;
 
   { tendência via topos e fundos }
-  UpTrend   := (topo2 > topo1) and (fundo2 > fundo1);
-  DownTrend := (topo2 < topo1) and (fundo2 < fundo1);
-
-  TemEstruturaAlta  := UpTrend;
-  TemEstruturaBaixa := DownTrend;
+  TemEstruturaAlta  := (topo2 > topo1) and (fundo2 > fundo1);
+  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1);
 
   { controle de visualizacao }
   MostrarMedias      := (ExibirTudo = 1) or (ExibirMedias = 1);
@@ -155,29 +152,26 @@ begin
 
   { COMPRA: MM entre stop e preço (suporte) }
   TemRegiaoCompra :=
-    ((Mm1 > StopCompra) and (Fechamento > Mm1)) or
-    ((Mm2 > StopCompra) and (Fechamento > Mm2)) or
-    ((Mm3 > StopCompra) and (Fechamento > Mm3));
+    ((Mm1 > StopCompra) and (Fechamento > Mm1)) or ((Mm2 > StopCompra) and (Fechamento > Mm2)) or ((Mm3 > StopCompra) and (Fechamento > Mm3));
 
   { VENDA: MM entre preço e stop (resistência) }
   TemRegiaoVenda :=
-    ((Mm1 < StopVenda) and (Abertura < Mm1)) or
-    ((Mm2 < StopVenda) and (Abertura < Mm2)) or
-    ((Mm3 < StopVenda) and (Abertura < Mm3));
+    ((Mm1 < StopVenda) and (Abertura < Mm1)) or ((Mm2 < StopVenda) and (Abertura < Mm2)) or ((Mm3 < StopVenda) and (Abertura < Mm3));
 
   CondicoesCompra := TemEstruturaAlta and TemRegiaoCompra and VerificaStocastico;
   CondicoesVenda := TemEstruturaBaixa and TemRegiaoVenda and VerificaStocastico;
 
   { =========================================================
-    Padrões 3x3
+    Padrao 132
     ========================================================= }
-  PadraoCompra_3x3 :=
-    Alta0 and Baixa1 and Baixa2 and Baixa3 and
-    Alta4 and Alta5 and Alta6 and Baixa7;
+    // Martelo de alta: Abs(Abertura[6] - Maxima[6]) > Abs(Fechamento[6] - Abertura[6])
+    // Martelo de baixa: Abs(Abertura[6] - Minima[6]) > Abs(Fechamento[6] - Abertura[6]);
 
-  PadraoVenda_3x3 :=
-    Baixa0 and Alta1 and Alta2 and Alta3 and
-    Baixa4 and Baixa5 and Baixa6 and Alta7;
+    PadraoCompra_132 := Alta0 and Alta1 and Baixa2 and Baixa3 and Baixa4 and Alta5 and 
+      (Abs(Abertura[6] - Maxima[6]) > Abs(Fechamento[6] - Abertura[6])); // Martelo de alta na 6 posição
+
+    PadraoVenda_132  := Baixa0 and Baixa1 and Alta2 and Alta3 and Alta4 and Baixa5 and 
+      (Abs(Abertura[6] - Minima[6]) > Abs(Fechamento[6] - Abertura[6])); // Martelo de baixa na 6 posição
 
   { =========================================================
     Pintura por tendência
@@ -197,17 +191,16 @@ begin
   { =========================================================
     Sinais
     ========================================================= }
-  if (Habilita_3x3 = 1) and PadraoCompra_3x3 and CondicoesCompra then
+  if (Habilita_132 = 1) and PadraoCompra_132 and CondicoesCompra then
     begin
       Alert(clYellow);
-      PlotText("3x3", clBlue, 0, 8);
+      PlotText("132", clBlue, 0, 8);
     end;
 
-
-  if (Habilita_3x3 = 1) and PadraoVenda_3x3 and CondicoesVenda then
+    if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
     begin
       Alert(clYellow);
-      PlotText("3x3", clFucsia, 2, 8);
+      PlotText("132", clFucsia, 2, 8);
     end;
 
 end;

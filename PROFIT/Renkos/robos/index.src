@@ -5,13 +5,18 @@ Parametro
   PeriodoMedia2(72);
   PeriodoMedia3(250);
   PeriodoToposFundos(5);
+  MultiplicadorPavio(1.0);
+  
   ExibirTudo(1);
   ExibirMedias(1);
   ExibirStocastico(1);
   ExibirToposFundos(1);
-  Habilita_3x3(0);
+
+  Habilita_3x3(1);
   Habilita_FC(0);
-  Habilita_211(1);
+  Habilita_211(0);
+  Habilita_132(1);
+  Habilita_RC(1); // XAUUSD 8R
 
 var
   { --- Indicadores / zonas --- }
@@ -22,27 +27,34 @@ var
   UpTrend, DownTrend : boolean;
 
   { --- Tijolo / stop --- }
-  TamanhoTijolo, StopCompra, StopVenda : real;
+  TamanhoTijolo, TamanhoTijolo3, TamanhoTijolo6, StopCompra, StopVenda : real;
 
   { --- Cores / estado --- }
   corAtual : integer;
 
   { --- Candle state (0 = atual) --- }
-  Alta0,  Alta1,  Alta2,  Alta3,  Alta4,  Alta5,  Alta6,  Alta7  : boolean;
-  Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7 : boolean;
-
-  { --- Pavio (usado em regras futuras, por enquanto não entra no padrão 3x3) --- }
-  Pavio5, Pavio4, Pavio3, Pavio2, Pavio1 : boolean;
+  Alta0,  Alta1,  Alta2,  Alta3,  Alta4,  Alta5,  Alta6,  Alta7, Alta8  : boolean;
+  Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7, Baixa8 : boolean;
 
   { --- Sombras/Pavios --- }
   SombraInferior0, SombraInferior1, SombraInferior2, SombraInferior3 : real;
   SombraSuperior0, SombraSuperior1, SombraSuperior2, SombraSuperior3 : real;
   TemSombraInferiorMaxima1, TemSombraSuperiorMaxima2, TemSombraSuperiorAltaMaxima1, TemSombraInferiorBaixaMaxima2 : boolean;
 
+  MarteloAlta0, MarteloAlta1, MarteloAlta2, MarteloAlta3, MarteloAlta4, MarteloAlta5, MarteloAlta6, MarteloAlta7: real;
+  MarteloBaixa0, MarteloBaixa1, MarteloBaixa2, MarteloBaixa3, MarteloBaixa4, MarteloBaixa5, MarteloBaixa6, MarteloBaixa7: real;
+
+    { --- Martelo --- }
+  PavioSuperior3, PavioInferior3, PavioSuperior6, PavioInferior6 : real;
+  TemMarteloAlta3, TemMarteloBaixa3, TemMarteloAlta6, TemMarteloBaixa6 : boolean;
+  TemPavioMaximo3, TemPavioMaximo6 : boolean;
+
   { --- Padrões --- }
   PadraoCompra_3x3, PadraoVenda_3x3 : boolean;
   PadraoCompra_FC, PadraoVenda_FC : boolean;
   PadraoCompra_211, PadraoVenda_211 : boolean;
+  PadraoCompra_132, PadraoVenda_132 : boolean;
+  PadraoCompra_RC, PadraoVenda_RC : boolean;
 
   { --- Filtros --- }
   HabilitaStokVenda, HabilitaStokCompra : boolean;
@@ -155,14 +167,6 @@ begin
   Baixa6 := Fechamento[6] < Abertura[6];
   Baixa7 := Fechamento[7] < Abertura[7];
 
-  { =========================================================
-    5) Pavio (mantido)
-    ========================================================= }
-  Pavio5 := (Maxima[5] > Max(Abertura[5], Fechamento[5])) or (Minima[5] < Min(Abertura[5], Fechamento[5]));
-  Pavio4 := (Maxima[4] > Max(Abertura[4], Fechamento[4])) or (Minima[4] < Min(Abertura[4], Fechamento[4]));
-  Pavio3 := (Maxima[3] > Max(Abertura[3], Fechamento[3])) or (Minima[3] < Min(Abertura[3], Fechamento[3]));
-  Pavio2 := (Maxima[2] > Max(Abertura[2], Fechamento[2])) or (Minima[2] < Min(Abertura[2], Fechamento[2]));
-  Pavio1 := (Maxima[1] > Max(Abertura[1], Fechamento[1])) or (Minima[1] < Min(Abertura[1], Fechamento[1]));
 
   { =========================================================
     Cálculo das Sombras (Pavios)
@@ -182,7 +186,13 @@ begin
   
   { Tijolo 3 }
   SombraInferior3 := Min(Abertura[3], Fechamento[3]) - Minima[3];
-  SombraSuperior3 := Maxima[3] - Max(Abertura[3], Fechamento[3]); 
+  SombraSuperior3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
+
+  MarteloAlta3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
+  MarteloBaixa3 := Min(Abertura[3], Fechamento[3]) - Minima[3]; 
+
+  MarteloAlta6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
+  MarteloBaixa6 := Min(Abertura[6], Fechamento[6]) - Minima[6]; 
 
   { =========================================================
     Identificação de Sombras Máximas
@@ -198,6 +208,12 @@ begin
   TemSombraSuperiorAltaMaxima1 := Alta1 and (SombraSuperior1 > TamanhoTijolo * 3);
 
   TemSombraInferiorBaixaMaxima2 :=  Baixa2 and (SombraInferior2 > TamanhoTijolo * 3);
+
+  TemMarteloAlta3 := Alta3 and (MarteloAlta3 > TamanhoTijolo * 1);
+  TemMarteloBaixa3 := Baixa3 and (MarteloBaixa3 > TamanhoTijolo * 1);
+
+  TemMarteloAlta6 := Alta6 and (MarteloAlta6 > TamanhoTijolo * 3);
+  TemMarteloBaixa6 := Baixa6 and (MarteloBaixa6 > TamanhoTijolo * 3);
   
   
   { =========================================================
@@ -223,6 +239,30 @@ begin
 
   CondicoesCompra := TemEstruturaAlta and TemRegiaoCompra and VerificaStocastico;
   CondicoesVenda := TemEstruturaBaixa and TemRegiaoVenda and VerificaStocastico;
+
+    { =========================================================
+    Martelo no candle [3]
+    ========================================================= }
+    TamanhoTijolo3 := Abs(Fechamento[3] - Abertura[3]);
+    PavioSuperior3 := Abs(Abertura[3] - Maxima[3]);
+    PavioInferior3 := Abs(Abertura[3] - Minima[3]);
+
+    TemMarteloAlta3  := PavioSuperior3 > TamanhoTijolo3;
+    TemMarteloBaixa3 := PavioInferior3 > TamanhoTijolo3;
+
+    { =========================================================
+    Martelo no candle [6]
+    ========================================================= }
+    TamanhoTijolo6 := Abs(Fechamento[6] - Abertura[6]);
+    PavioSuperior6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
+    PavioInferior6 := Min(Abertura[6], Fechamento[6]) - Minima[6];
+
+    TemPavioMaximo6 :=
+      (PavioSuperior6 >= TamanhoTijolo6 * MultiplicadorPavio) or
+      (PavioInferior6 >= TamanhoTijolo6 * MultiplicadorPavio);
+
+    TemMarteloAlta6  := Alta6 and TemPavioMaximo6;
+    TemMarteloBaixa6 := Baixa6 and TemPavioMaximo6;
 
   { =========================================================
     Padrões 3x3
@@ -254,40 +294,97 @@ begin
     Baixa0 and Alta1 and Baixa2 and Baixa3 and Alta4;
 
   { =========================================================
+    Padrao 132
+    ========================================================= }
+    PadraoCompra_132 := Alta0 and Alta1 and Baixa2 and Baixa3 and Baixa4 and Alta5 and TemMarteloAlta6;
+    PadraoVenda_132  := Baixa0 and Baixa1 and Alta2 and Alta3 and Alta4 and Baixa5 and TemMarteloBaixa6;
+
+  { =========================================================
+    Padrao   RC
+    ========================================================= }
+    PadraoCompra_RC := (Minima < Minima[1]) and Alta0 and Alta1 and Alta2 and Baixa3;
+    PadraoVenda_RC  := (Maxima > Maxima[1]) and Baixa0 and Baixa1 and Baixa2 and Alta3;
+
+
+  { =========================================================
     Pintura por tendência
     ========================================================= }
   if MostrarToposFundos then
-  begin
-    corAtual := clSilver;
+    begin
+      corAtual := clSilver;
 
-    if UpTrend then
-      corAtual := clVerde
-    else if DownTrend then
-      corAtual := clVermelho;
+      if UpTrend then
+        corAtual := clVerde
+      else if DownTrend then
+        corAtual := clVermelho;
 
-    PaintBar(corAtual);
-  end;
+      PaintBar(corAtual);
+    end;
 
   { =========================================================
     Sinais
     ========================================================= }
   if (Habilita_3x3 = 1) and PadraoCompra_3x3 and CondicoesCompra then
-    PlotText("3x3", clBlue, 0, 8);
+    begin
+      //Alert(clRed);
+      PlotText("3x3", clBlue, 0, 8);
+    end;
+
 
   if (Habilita_3x3 = 1) and PadraoVenda_3x3 and CondicoesVenda then
-    PlotText("3x3", clFucsia, 2, 8);
+    begin
+      //Alert(clRed);
+      PlotText("3x3", clFucsia, 2, 8);
+    end;
 
   if (Habilita_FC = 1) and PadraoCompra_FC and CondicoesCompra then
-    PlotText("FC", clBlue, 0, 8);
+    begin
+      //Alert(clRed);
+      PlotText("FC", clBlue, 0, 8);
+    end;
 
   if (Habilita_FC = 1) and PadraoVenda_FC and CondicoesVenda then
-    PlotText("FC", clFucsia, 2, 8);
+    begin
+      //Alert(clRed);
+      PlotText("FC", clFucsia, 2, 8);
+    end;
+
 
   if (Habilita_211 = 1) and PadraoCompra_211 and CondicoesCompra then
-    PlotText("211", clBlue, 0, 8);
+    begin
+      //Alert(clRed);
+      PlotText("211", clBlue, 0, 8);
+    end;
 
   if (Habilita_211 = 1) and PadraoVenda_211 and CondicoesVenda then
-    PlotText("211", clFucsia, 2, 8);
+    begin
+      //Alert(clRed);
+      PlotText("211", clFucsia, 2, 8);
+    end;
+
+  if (Habilita_132 = 1) and PadraoCompra_132 and CondicoesCompra then
+    begin
+      //Alert(clRed);
+      PlotText("132", clBlue, 0, 8);
+    end;
+
+    if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
+    begin
+      //Alert(clRed);
+      PlotText("132", clFucsia, 2, 8);
+    end;
+
+  if (Habilita_RC = 1) and PadraoCompra_RC and CondicoesCompra then
+    begin
+      //Alert(clRed);
+      PlotText("RC", clBlue, 0, 8);
+    end;
+
+    if (Habilita_RC = 1) and PadraoVenda_RC and CondicoesVenda then
+    begin
+      //Alert(clRed);
+      PlotText("RC", clFucsia, 2, 8);
+    end;
 
   { =========================================================
     Gerenciamento de Posições com Trailing Stop
@@ -361,7 +458,9 @@ begin
   if (not IsBought) and (not IsSold) and 
   (PadraoCompra_3x3 and (Habilita_3x3 = 1) or 
   (PadraoCompra_FC and (Habilita_FC = 1)) or
-  (PadraoCompra_211 and (Habilita_211 = 1))
+  (PadraoCompra_211 and (Habilita_211 = 1)) or
+  (PadraoCompra_132 and (Habilita_132 = 1)) or
+  (PadraoCompra_RC and (Habilita_RC = 1))
   ) and CondicoesCompra then
   begin
     BuyAtMarket;
@@ -369,7 +468,9 @@ begin
   else if (not IsBought) and (not IsSold) and
   (PadraoVenda_3x3 and (Habilita_3x3 = 1) or 
   (PadraoVenda_FC and (Habilita_FC = 1)) or
-  (PadraoVenda_211 and (Habilita_211 = 1))
+  (PadraoVenda_211 and (Habilita_211 = 1)) or
+  (PadraoVenda_132 and (Habilita_132 = 1)) or
+  (PadraoVenda_RC and (Habilita_RC = 1))
   ) and CondicoesVenda then
   begin
     SellShortAtMarket;
