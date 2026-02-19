@@ -1,131 +1,219 @@
 Parametro
-  Stop(4.5);
-  Take(9.0);
+  Stop(4.5); // 4.5
+  Take(9.0); // 9.0
+
+  Take2(8.0); // 8.0
+  Take3(7.0); // 7.0
+  Take4(3.0); // 3.0
+
+  Stop2(4.0); // 4.0
+  Stop3(1.0); // 1.0
+
   PeriodoMedia1(34);
   PeriodoMedia2(72);
   PeriodoMedia3(250);
   PeriodoToposFundos(5);
+  
   MultiplicadorPavio(1.0);
+  
+  pAtualizarReferenciaRompimento(true);
+  pModoPlot(0);
+  pExibirTextoConfirmacao(false);
   
   ExibirTudo(1);
   ExibirMedias(1);
   ExibirStocastico(1);
   ExibirToposFundos(1);
-
+  
   Habilita_3x3(1);
-  Habilita_FC(0);
-  Habilita_211(0);
+  Habilita_FC(1);
+  Habilita_211(1);
   Habilita_132(1);
-  Habilita_RC(1); // XAUUSD 8R
+  Habilita_RC(1);
 
 var
-  { --- Indicadores / zonas --- }
   ToposFundos, StoK, Mm1, Mm2, Mm3 : real;
-
-  { --- Estrutura (topos e fundos) --- }
   topo1, topo2, fundo1, fundo2 : real;
   UpTrend, DownTrend : boolean;
 
-  { --- Tijolo / stop --- }
   TamanhoTijolo, TamanhoTijolo3, TamanhoTijolo6, StopCompra, StopVenda : real;
-
-  { --- Cores / estado --- }
   corAtual : integer;
 
-  { --- Candle state (0 = atual) --- }
-  Alta0,  Alta1,  Alta2,  Alta3,  Alta4,  Alta5,  Alta6,  Alta7, Alta8  : boolean;
+  Alta0, Alta1, Alta2, Alta3, Alta4, Alta5, Alta6, Alta7, Alta8 : boolean;
   Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7, Baixa8 : boolean;
 
-  { --- Sombras/Pavios --- }
   SombraInferior0, SombraInferior1, SombraInferior2, SombraInferior3 : real;
   SombraSuperior0, SombraSuperior1, SombraSuperior2, SombraSuperior3 : real;
   TemSombraInferiorMaxima1, TemSombraSuperiorMaxima2, TemSombraSuperiorAltaMaxima1, TemSombraInferiorBaixaMaxima2 : boolean;
 
-  MarteloAlta0, MarteloAlta1, MarteloAlta2, MarteloAlta3, MarteloAlta4, MarteloAlta5, MarteloAlta6, MarteloAlta7: real;
-  MarteloBaixa0, MarteloBaixa1, MarteloBaixa2, MarteloBaixa3, MarteloBaixa4, MarteloBaixa5, MarteloBaixa6, MarteloBaixa7: real;
+  MarteloAlta0, MarteloAlta1, MarteloAlta2, MarteloAlta3, MarteloAlta4, MarteloAlta5, MarteloAlta6, MarteloAlta7 : real;
+  MarteloBaixa0, MarteloBaixa1, MarteloBaixa2, MarteloBaixa3, MarteloBaixa4, MarteloBaixa5, MarteloBaixa6, MarteloBaixa7 : real;
 
-    { --- Martelo --- }
   PavioSuperior3, PavioInferior3, PavioSuperior6, PavioInferior6 : real;
   TemMarteloAlta3, TemMarteloBaixa3, TemMarteloAlta6, TemMarteloBaixa6 : boolean;
   TemPavioMaximo3, TemPavioMaximo6 : boolean;
 
-  { --- Padrões --- }
   PadraoCompra_3x3, PadraoVenda_3x3 : boolean;
   PadraoCompra_FC, PadraoVenda_FC : boolean;
   PadraoCompra_211, PadraoVenda_211 : boolean;
   PadraoCompra_132, PadraoVenda_132 : boolean;
   PadraoCompra_RC, PadraoVenda_RC : boolean;
 
-  { --- Filtros --- }
   HabilitaStokVenda, HabilitaStokCompra : boolean;
   VerificaStocastico : boolean;
   TemRegiaoCompra, TemRegiaoVenda : boolean;
   TemEstruturaAlta, TemEstruturaBaixa : boolean;
 
-  { --- Condições de entrada --- }
   CondicoesCompra, CondicoesVenda : boolean;
   MostrarMedias, MostrarStocastico, MostrarToposFundos : boolean;
 
-  { --- NOVO: Trailing Stop Breakeven --- }
   PrecoEntradaLong, PrecoEntradaShort : real;
   StopAtualLong, StopAtualShort : real;
   MaiorStopLong, MaiorStopShort : real;
 
+  iIdentUltimaBarraIdentificada : integer;
+  fMaximoAtual, fMinimoAtual : float;
+  fMinimoRefRomp, fMaximoRefRomp : float;
+  iMaximoAtual, iMinimoAtual : integer;
+  iContadorRompimentos : integer;
+
+  fTopoFundoConfirmado : float;
+  fUltimoTopoConfirmado : float;
+  fUltimoFundoConfirmado : float;
+
 begin
-  { =========================================================
-    1) Estocástico
-    ========================================================= }
   StoK := SlowStochastic(21, 9, kaArithmetic);
 
-  { regra atual (mantida) }
-  HabilitaStokVenda  := (StoK < 85);
+  HabilitaStokVenda := (StoK < 85);
   HabilitaStokCompra := (StoK > 15);
-
-  { do jeito que está, isso tende a ficar true quase sempre (15..85) }
   VerificaStocastico := (HabilitaStokVenda and HabilitaStokCompra);
 
-  { =========================================================
-    2) Médias Móveis
-    ========================================================= }
   Mm1 := MediaExp(PeriodoMedia1, Fechamento);
   Mm2 := MediaExp(PeriodoMedia2, Fechamento);
   Mm3 := MediaExp(PeriodoMedia3, Fechamento);
 
-  { =========================================================
-    3) Topos e Fundos + tendência (estrutura)
-    ========================================================= }
-  ToposFundos := TopBottomDetector(PeriodoToposFundos);
+  fMaximoAtual := fMaximoAtual[1];
+  fMinimoAtual := fMinimoAtual[1];
+  fMaximoRefRomp := fMaximoRefRomp[1];
+  fMinimoRefRomp := fMinimoRefRomp[1];
+  iMaximoAtual := iMaximoAtual[1];
+  iMinimoAtual := iMinimoAtual[1];
+  iContadorRompimentos := iContadorRompimentos[1];
+  iIdentUltimaBarraIdentificada := iIdentUltimaBarraIdentificada[1];
 
-  { carrega valores anteriores }
-  topo1  := topo1[1];
-  topo2  := topo2[1];
+  fTopoFundoConfirmado := fTopoFundoConfirmado[1];
+  fUltimoTopoConfirmado := fUltimoTopoConfirmado[1];
+  fUltimoFundoConfirmado := fUltimoFundoConfirmado[1];
+
+  if CurrentBar = 1 then
+  begin
+    fMaximoAtual := High;
+    fMinimoAtual := Low;
+    fMaximoRefRomp := High;
+    fMinimoRefRomp := Low;
+    iMaximoAtual := CurrentBar;
+    iMinimoAtual := CurrentBar;
+    iContadorRompimentos := 0;
+    iIdentUltimaBarraIdentificada := 1;
+  end;
+
+  if iIdentUltimaBarraIdentificada > 0 then
+  begin
+    if Low < fMinimoAtual then
+    begin
+      fMinimoAtual := Low;
+      iMinimoAtual := CurrentBar;
+      fMaximoRefRomp := High;
+      iContadorRompimentos := 0;
+    end;
+
+    if pAtualizarReferenciaRompimento then
+    begin
+      if High > fMaximoRefRomp then
+      begin
+        fMaximoRefRomp := High;
+        iContadorRompimentos := iContadorRompimentos + 1;
+      end;
+    end
+    else if High > High[CurrentBar - iMinimoAtual] then
+      iContadorRompimentos := iContadorRompimentos + 1;
+
+    if (iContadorRompimentos >= PeriodoToposFundos) or (High > fMaximoAtual) then
+    begin
+      fTopoFundoConfirmado := fMinimoAtual;
+      fUltimoFundoConfirmado := fTopoFundoConfirmado;
+      Plot(fTopoFundoConfirmado);
+
+      iIdentUltimaBarraIdentificada := -CurrentBar;
+      fMaximoAtual := High;
+      iMaximoAtual := CurrentBar;
+      fMinimoRefRomp := Low;
+      iContadorRompimentos := 0;
+
+      if pExibirTextoConfirmacao then
+        PlotText(fTopoFundoConfirmado, clGreen, -1, 9);
+    end;
+  end
+  else
+  begin
+    if High > fMaximoAtual then
+    begin
+      fMaximoAtual := High;
+      iMaximoAtual := CurrentBar;
+      fMinimoRefRomp := Low;
+      iContadorRompimentos := 0;
+    end;
+
+    if pAtualizarReferenciaRompimento then
+    begin
+      if Low < fMinimoRefRomp then
+      begin
+        fMinimoRefRomp := Low;
+        iContadorRompimentos := iContadorRompimentos + 1;
+      end;
+    end
+    else if Low < Low[CurrentBar - iMaximoAtual] then
+      iContadorRompimentos := iContadorRompimentos + 1;
+
+    if (iContadorRompimentos >= PeriodoToposFundos) or (Low < fMinimoAtual) then
+    begin
+      fTopoFundoConfirmado := fMaximoAtual;
+      fUltimoTopoConfirmado := fTopoFundoConfirmado;
+      Plot(fTopoFundoConfirmado);
+
+      iIdentUltimaBarraIdentificada := CurrentBar;
+      fMinimoAtual := Low;
+      iMinimoAtual := CurrentBar;
+      fMaximoRefRomp := High;
+      iContadorRompimentos := 0;
+
+      if pExibirTextoConfirmacao then
+        PlotText(fTopoFundoConfirmado, clRed, -1, 9);
+    end;
+  end;
+
+  topo1 := topo1[1];
+  topo2 := topo2[1];
   fundo1 := fundo1[1];
   fundo2 := fundo2[1];
 
-  { novo topo confirmado }
-  if (ToposFundos <> 0) and (ToposFundos = Maxima) then
-  begin
-    topo1 := topo2;
-    topo2 := ToposFundos;
-  end;
-
-  { novo fundo confirmado }
-  if (ToposFundos <> 0) and (ToposFundos = Minima) then
+  if (fUltimoFundoConfirmado <> 0) and (fUltimoFundoConfirmado <> fundo2[1]) then
   begin
     fundo1 := fundo2;
-    fundo2 := ToposFundos;
+    fundo2 := fUltimoFundoConfirmado;
   end;
 
-  { tendência via topos e fundos }
-  UpTrend   := (topo2 > topo1) and (fundo2 > fundo1);
-  DownTrend := (topo2 < topo1) and (fundo2 < fundo1);
+  if (fUltimoTopoConfirmado <> 0) and (fUltimoTopoConfirmado <> topo2[1]) then
+  begin
+    topo1 := topo2;
+    topo2 := fUltimoTopoConfirmado;
+  end;
 
-  TemEstruturaAlta  := UpTrend;
-  TemEstruturaBaixa := DownTrend;
+  TemEstruturaAlta := (topo2 > topo1) and (fundo2 > fundo1);
+  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1);
 
-  { controle de visualizacao }
-  MostrarMedias      := (ExibirTudo = 1) or (ExibirMedias = 1);
-  MostrarStocastico  := (ExibirTudo = 1) or (ExibirStocastico = 1);
+  MostrarMedias := (ExibirTudo = 1) or (ExibirMedias = 1);
+  MostrarStocastico := (ExibirTudo = 1) or (ExibirStocastico = 1);
   MostrarToposFundos := (ExibirTudo = 1) or (ExibirToposFundos = 1);
 
   if MostrarStocastico then
@@ -146,10 +234,7 @@ begin
     NoPlot(4);
   end;
 
-  { =========================================================
-    4) Estado dos últimos 8 tijolos (0 = atual)
-    ========================================================= }
-  Alta0 := Fechamento    > Abertura;
+  Alta0 := Fechamento > Abertura;
   Alta1 := Fechamento[1] > Abertura[1];
   Alta2 := Fechamento[2] > Abertura[2];
   Alta3 := Fechamento[3] > Abertura[3];
@@ -158,7 +243,7 @@ begin
   Alta6 := Fechamento[6] > Abertura[6];
   Alta7 := Fechamento[7] > Abertura[7];
 
-  Baixa0 := Fechamento    < Abertura;
+  Baixa0 := Fechamento < Abertura;
   Baixa1 := Fechamento[1] < Abertura[1];
   Baixa2 := Fechamento[2] < Abertura[2];
   Baixa3 := Fechamento[3] < Abertura[3];
@@ -167,71 +252,44 @@ begin
   Baixa6 := Fechamento[6] < Abertura[6];
   Baixa7 := Fechamento[7] < Abertura[7];
 
-
-  { =========================================================
-    Cálculo das Sombras (Pavios)
-    ========================================================= }
-  
-  { Tijolo 0 (atual) }
   SombraInferior0 := Min(Abertura, Fechamento) - Minima;
   SombraSuperior0 := Maxima - Max(Abertura, Fechamento);
-  
-  { Tijolo 1 }
+
   SombraInferior1 := Min(Abertura[1], Fechamento[1]) - Minima[1];
   SombraSuperior1 := Maxima[1] - Max(Abertura[1], Fechamento[1]);
-  
-  { Tijolo 2 }
+
   SombraInferior2 := Min(Abertura[2], Fechamento[2]) - Minima[2];
   SombraSuperior2 := Maxima[2] - Max(Abertura[2], Fechamento[2]);
-  
-  { Tijolo 3 }
+
   SombraInferior3 := Min(Abertura[3], Fechamento[3]) - Minima[3];
   SombraSuperior3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
 
   MarteloAlta3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
-  MarteloBaixa3 := Min(Abertura[3], Fechamento[3]) - Minima[3]; 
+  MarteloBaixa3 := Min(Abertura[3], Fechamento[3]) - Minima[3];
 
   MarteloAlta6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
-  MarteloBaixa6 := Min(Abertura[6], Fechamento[6]) - Minima[6]; 
+  MarteloBaixa6 := Min(Abertura[6], Fechamento[6]) - Minima[6];
 
-  { =========================================================
-    Identificação de Sombras Máximas
-    ========================================================= }
-  
-  { Tijolo de ALTA com sombra INFERIOR máxima (rejeição de baixa) }
   TemSombraInferiorMaxima1 := Alta1 and (SombraInferior1 > TamanhoTijolo * 3);
-  
-  { Tijolo de BAIXA com sombra SUPERIOR máxima (rejeição de alta) }
   TemSombraSuperiorMaxima2 := Baixa2 and (SombraSuperior2 > TamanhoTijolo * 3);
-
-  { Tijolo de ALTA com sombra SUPERIOR máxima (exaustão de alta / topo) }
   TemSombraSuperiorAltaMaxima1 := Alta1 and (SombraSuperior1 > TamanhoTijolo * 3);
-
-  TemSombraInferiorBaixaMaxima2 :=  Baixa2 and (SombraInferior2 > TamanhoTijolo * 3);
+  TemSombraInferiorBaixaMaxima2 := Baixa2 and (SombraInferior2 > TamanhoTijolo * 3);
 
   TemMarteloAlta3 := Alta3 and (MarteloAlta3 > TamanhoTijolo * 1);
   TemMarteloBaixa3 := Baixa3 and (MarteloBaixa3 > TamanhoTijolo * 1);
-
   TemMarteloAlta6 := Alta6 and (MarteloAlta6 > TamanhoTijolo * 3);
   TemMarteloBaixa6 := Baixa6 and (MarteloBaixa6 > TamanhoTijolo * 3);
-  
-  
-  { =========================================================
-    6) Região via stop (MM entre preço e stop)
-    ========================================================= }
+
   TamanhoTijolo := Abs(Fechamento - Abertura);
 
-  { preços de stop teóricos (mantive sua fórmula) }
   StopCompra := Abertura - (TamanhoTijolo * Stop);
-  StopVenda  := Abertura + (TamanhoTijolo * Stop);
+  StopVenda := Abertura + (TamanhoTijolo * Stop);
 
-  { COMPRA: MM entre stop e preço (suporte) }
   TemRegiaoCompra :=
     ((Mm1 > StopCompra) and (Fechamento > Mm1)) or
     ((Mm2 > StopCompra) and (Fechamento > Mm2)) or
     ((Mm3 > StopCompra) and (Fechamento > Mm3));
 
-  { VENDA: MM entre preço e stop (resistência) }
   TemRegiaoVenda :=
     ((Mm1 < StopVenda) and (Abertura < Mm1)) or
     ((Mm2 < StopVenda) and (Abertura < Mm2)) or
@@ -240,33 +298,24 @@ begin
   CondicoesCompra := TemEstruturaAlta and TemRegiaoCompra and VerificaStocastico;
   CondicoesVenda := TemEstruturaBaixa and TemRegiaoVenda and VerificaStocastico;
 
-    { =========================================================
-    Martelo no candle [3]
-    ========================================================= }
-    TamanhoTijolo3 := Abs(Fechamento[3] - Abertura[3]);
-    PavioSuperior3 := Abs(Abertura[3] - Maxima[3]);
-    PavioInferior3 := Abs(Abertura[3] - Minima[3]);
+  TamanhoTijolo3 := Abs(Fechamento[3] - Abertura[3]);
+  PavioSuperior3 := Abs(Abertura[3] - Maxima[3]);
+  PavioInferior3 := Abs(Abertura[3] - Minima[3]);
 
-    TemMarteloAlta3  := PavioSuperior3 > TamanhoTijolo3;
-    TemMarteloBaixa3 := PavioInferior3 > TamanhoTijolo3;
+  TemMarteloAlta3 := PavioSuperior3 > TamanhoTijolo3;
+  TemMarteloBaixa3 := PavioInferior3 > TamanhoTijolo3;
 
-    { =========================================================
-    Martelo no candle [6]
-    ========================================================= }
-    TamanhoTijolo6 := Abs(Fechamento[6] - Abertura[6]);
-    PavioSuperior6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
-    PavioInferior6 := Min(Abertura[6], Fechamento[6]) - Minima[6];
+  TamanhoTijolo6 := Abs(Fechamento[6] - Abertura[6]);
+  PavioSuperior6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
+  PavioInferior6 := Min(Abertura[6], Fechamento[6]) - Minima[6];
 
-    TemPavioMaximo6 :=
-      (PavioSuperior6 >= TamanhoTijolo6 * MultiplicadorPavio) or
-      (PavioInferior6 >= TamanhoTijolo6 * MultiplicadorPavio);
+  TemPavioMaximo6 :=
+    (PavioSuperior6 >= TamanhoTijolo6 * MultiplicadorPavio) or
+    (PavioInferior6 >= TamanhoTijolo6 * MultiplicadorPavio);
 
-    TemMarteloAlta6  := Alta6 and TemPavioMaximo6;
-    TemMarteloBaixa6 := Baixa6 and TemPavioMaximo6;
+  TemMarteloAlta6 := Alta6 and TemPavioMaximo6;
+  TemMarteloBaixa6 := Baixa6 and TemPavioMaximo6;
 
-  { =========================================================
-    Padrões 3x3
-    ========================================================= }
   PadraoCompra_3x3 :=
     Alta0 and Baixa1 and Baixa2 and Baixa3 and
     Alta4 and Alta5 and Alta6 and Baixa7;
@@ -275,116 +324,101 @@ begin
     Baixa0 and Alta1 and Alta2 and Alta3 and
     Baixa4 and Baixa5 and Baixa6 and Alta7;
 
-  { =========================================================
-    Padrões FC
-    ========================================================= }
   PadraoCompra_FC :=
     Alta0 and TemSombraInferiorMaxima1 and TemSombraSuperiorMaxima2 and Baixa3;
 
   PadraoVenda_FC :=
-    Baixa0 and TemSombraSuperiorAltaMaxima1  and TemSombraInferiorBaixaMaxima2 and Baixa4;
+    Baixa0 and TemSombraSuperiorAltaMaxima1 and TemSombraInferiorBaixaMaxima2 and Baixa4;
 
-  { =========================================================
-    Padrões 211
-    ========================================================= }
   PadraoCompra_211 :=
     Alta0 and Baixa1 and Alta2 and Alta3 and Baixa4;
 
   PadraoVenda_211 :=
     Baixa0 and Alta1 and Baixa2 and Baixa3 and Alta4;
 
-  { =========================================================
-    Padrao 132
-    ========================================================= }
-    PadraoCompra_132 := Alta0 and Alta1 and Baixa2 and Baixa3 and Baixa4 and Alta5 and TemMarteloAlta6;
-    PadraoVenda_132  := Baixa0 and Baixa1 and Alta2 and Alta3 and Alta4 and Baixa5 and TemMarteloBaixa6;
+  PadraoCompra_132 :=
+    Alta0 and Alta1 and Baixa2 and Baixa3 and Baixa4 and Alta5 and TemMarteloAlta6;
 
-  { =========================================================
-    Padrao   RC
-    ========================================================= }
-    PadraoCompra_RC := (Minima < Minima[1]) and Alta0 and Alta1 and Alta2 and Baixa3;
-    PadraoVenda_RC  := (Maxima > Maxima[1]) and Baixa0 and Baixa1 and Baixa2 and Alta3;
+  PadraoVenda_132 :=
+    Baixa0 and Baixa1 and Alta2 and Alta3 and Alta4 and Baixa5 and TemMarteloBaixa6;
 
+  PadraoCompra_RC :=
+    (Minima < Minima[1]) and Alta0 and Alta1 and Alta2 and Baixa3;
 
-  { =========================================================
-    Pintura por tendência
-    ========================================================= }
+  PadraoVenda_RC :=
+    (Maxima > Maxima[1]) and Baixa0 and Baixa1 and Baixa2 and Alta3;
+
   if MostrarToposFundos then
-    begin
-      corAtual := clSilver;
+  begin
+    corAtual := clSilver;
 
-      if UpTrend then
-        corAtual := clVerde
-      else if DownTrend then
-        corAtual := clVermelho;
+    if TemEstruturaAlta then
+      corAtual := clVerde
+    else if TemEstruturaBaixa then
+      corAtual := clVermelho;
 
-      PaintBar(corAtual);
-    end;
+    PaintBar(corAtual);
+  end;
 
-  { =========================================================
-    Sinais
-    ========================================================= }
   if (Habilita_3x3 = 1) and PadraoCompra_3x3 and CondicoesCompra then
-    begin
-      //Alert(clRed);
-      PlotText("3x3", clBlue, 0, 8);
-    end;
-
+  begin
+    Alert(clYellow);
+    PlotText("3x3", clBlue, 0, 8);
+  end;
 
   if (Habilita_3x3 = 1) and PadraoVenda_3x3 and CondicoesVenda then
-    begin
-      //Alert(clRed);
-      PlotText("3x3", clFucsia, 2, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("3x3", clFucsia, 2, 8);
+  end;
 
   if (Habilita_FC = 1) and PadraoCompra_FC and CondicoesCompra then
-    begin
-      //Alert(clRed);
-      PlotText("FC", clBlue, 0, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("FC", clBlue, 0, 8);
+  end;
 
   if (Habilita_FC = 1) and PadraoVenda_FC and CondicoesVenda then
-    begin
-      //Alert(clRed);
-      PlotText("FC", clFucsia, 2, 8);
-    end;
-
+  begin
+    Alert(clYellow);
+    PlotText("FC", clFucsia, 2, 8);
+  end;
 
   if (Habilita_211 = 1) and PadraoCompra_211 and CondicoesCompra then
-    begin
-      //Alert(clRed);
-      PlotText("211", clBlue, 0, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("211", clBlue, 0, 8);
+  end;
 
   if (Habilita_211 = 1) and PadraoVenda_211 and CondicoesVenda then
-    begin
-      //Alert(clRed);
-      PlotText("211", clFucsia, 2, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("211", clFucsia, 2, 8);
+  end;
 
   if (Habilita_132 = 1) and PadraoCompra_132 and CondicoesCompra then
-    begin
-      //Alert(clRed);
-      PlotText("132", clBlue, 0, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("132", clBlue, 0, 8);
+  end;
 
-    if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
-    begin
-      //Alert(clRed);
-      PlotText("132", clFucsia, 2, 8);
-    end;
+  if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
+  begin
+    Alert(clYellow);
+    PlotText("132", clFucsia, 2, 8);
+  end;
 
   if (Habilita_RC = 1) and PadraoCompra_RC and CondicoesCompra then
-    begin
-      //Alert(clRed);
-      PlotText("RC", clBlue, 0, 8);
-    end;
+  begin
+    Alert(clYellow);
+    PlotText("RC", clBlue, 0, 8);
+  end;
 
-    if (Habilita_RC = 1) and PadraoVenda_RC and CondicoesVenda then
-    begin
-      //Alert(clRed);
-      PlotText("RC", clFucsia, 2, 8);
-    end;
+  if (Habilita_RC = 1) and PadraoVenda_RC and CondicoesVenda then
+  begin
+    Alert(clRed);
+    PlotText("RC", clFucsia, 2, 8);
+  end;
 
   { =========================================================
     Gerenciamento de Posições com Trailing Stop
@@ -407,11 +441,11 @@ begin
     end; 
     
     { Define o stop com níveis progressivos }
-    if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * 8)) then
-      StopAtualLong := PrecoEntradaLong + (TamanhoTijolo * 4)
-    else if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * 7)) then
-      StopAtualLong := PrecoEntradaLong + (TamanhoTijolo * 1)
-    else if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * 3)) then
+    if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * Take2)) then
+      StopAtualLong := PrecoEntradaLong + (TamanhoTijolo * Stop2)
+    else if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * Take3)) then
+      StopAtualLong := PrecoEntradaLong + (TamanhoTijolo * Stop3)
+    else if (Maxima >= PrecoEntradaLong + (TamanhoTijolo * Take4)) then
       StopAtualLong := PrecoEntradaLong
     else
       StopAtualLong := Price - (TamanhoTijolo * Stop);
@@ -474,6 +508,5 @@ begin
   ) and CondicoesVenda then
   begin
     SellShortAtMarket;
-  end;   
-
+  end; 
 end;
