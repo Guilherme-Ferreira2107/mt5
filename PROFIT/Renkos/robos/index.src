@@ -6,7 +6,8 @@ Parametro
   Take4(3.0);
   Stop2(4.0);
   Stop3(1.0);
-  LimiteProtecao(4.5);
+
+  LimiteProtecao(3.0);
 
 //  Stop(1.0);
 //  Take(3.0);
@@ -48,22 +49,15 @@ var
   topo1, topo2, fundo1, fundo2 : real;
   UpTrend, DownTrend : boolean;
 
-  TamanhoTijolo, TamanhoTijolo3, TamanhoTijolo6, StopCompra, StopVenda : real;
+  TamanhoTijolo, TamanhoTijolo6, StopCompra, StopVenda : real;
   corAtual : integer;
 
   Alta0, Alta1, Alta2, Alta3, Alta4, Alta5, Alta6, Alta7, Alta8 : boolean;
   Baixa0, Baixa1, Baixa2, Baixa3, Baixa4, Baixa5, Baixa6, Baixa7, Baixa8 : boolean;
 
-  SombraInferior0, SombraInferior1, SombraInferior2, SombraInferior3 : real;
-  SombraSuperior0, SombraSuperior1, SombraSuperior2, SombraSuperior3 : real;
-  TemSombraInferiorMaxima1, TemSombraSuperiorMaxima2, TemSombraSuperiorAltaMaxima1, TemSombraInferiorBaixaMaxima2 : boolean;
-
-  MarteloAlta0, MarteloAlta1, MarteloAlta2, MarteloAlta3, MarteloAlta4, MarteloAlta5, MarteloAlta6, MarteloAlta7 : real;
-  MarteloBaixa0, MarteloBaixa1, MarteloBaixa2, MarteloBaixa3, MarteloBaixa4, MarteloBaixa5, MarteloBaixa6, MarteloBaixa7 : real;
-
-  PavioSuperior3, PavioInferior3, PavioSuperior6, PavioInferior6 : real;
-  TemMarteloAlta3, TemMarteloBaixa3, TemMarteloAlta6, TemMarteloBaixa6 : boolean;
-  TemPavioMaximo3, TemPavioMaximo6 : boolean;
+  PavioSuperior6, PavioInferior6 : real;
+  TemMarteloAlta6, TemMarteloBaixa6 : boolean;
+  TemPavioMaximo6 : boolean;
 
   PadraoCompra_3x3, PadraoVenda_3x3 : boolean;
   PadraoCompra_FC, PadraoVenda_FC : boolean;
@@ -225,8 +219,8 @@ begin
     topo2 := fUltimoTopoConfirmado;
   end;
 
-  TemEstruturaAlta := (topo2 > topo1) and (fundo2 > fundo1);
-  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1);
+  TemEstruturaAlta := (topo2 > topo1) and (fundo2 > fundo1) and (Abertura > fundo2);
+  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1) and (Abertura < topo2);
 
   MostrarMedias := (ExibirTudo = 1) or (ExibirMedias = 1);
   MostrarStocastico := (ExibirTudo = 1) or (ExibirStocastico = 1);
@@ -258,6 +252,7 @@ begin
   Alta5 := Fechamento[5] > Abertura[5];
   Alta6 := Fechamento[6] > Abertura[6];
   Alta7 := Fechamento[7] > Abertura[7];
+  Alta8 := Fechamento[8] > Abertura[8];
 
   Baixa0 := Fechamento < Abertura;
   Baixa1 := Fechamento[1] < Abertura[1];
@@ -267,44 +262,17 @@ begin
   Baixa5 := Fechamento[5] < Abertura[5];
   Baixa6 := Fechamento[6] < Abertura[6];
   Baixa7 := Fechamento[7] < Abertura[7];
-
-  SombraInferior0 := Min(Abertura, Fechamento) - Minima;
-  SombraSuperior0 := Maxima - Max(Abertura, Fechamento);
-
-  SombraInferior1 := Min(Abertura[1], Fechamento[1]) - Minima[1];
-  SombraSuperior1 := Maxima[1] - Max(Abertura[1], Fechamento[1]);
-
-  SombraInferior2 := Min(Abertura[2], Fechamento[2]) - Minima[2];
-  SombraSuperior2 := Maxima[2] - Max(Abertura[2], Fechamento[2]);
-
-  SombraInferior3 := Min(Abertura[3], Fechamento[3]) - Minima[3];
-  SombraSuperior3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
-
-  MarteloAlta3 := Maxima[3] - Max(Abertura[3], Fechamento[3]);
-  MarteloBaixa3 := Min(Abertura[3], Fechamento[3]) - Minima[3];
-
-  MarteloAlta6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
-  MarteloBaixa6 := Min(Abertura[6], Fechamento[6]) - Minima[6];
+  Baixa8 := Fechamento[8] < Abertura[8];
 
   TamanhoTijolo := Abs(Fechamento - Abertura);
-
-  TemSombraInferiorMaxima1 := Alta1 and (SombraInferior1 > TamanhoTijolo * 3);
-  TemSombraSuperiorMaxima2 := Baixa2 and (SombraSuperior2 > TamanhoTijolo * 3);
-  TemSombraSuperiorAltaMaxima1 := Alta1 and (SombraSuperior1 > TamanhoTijolo * 3);
-  TemSombraInferiorBaixaMaxima2 := Baixa2 and (SombraInferior2 > TamanhoTijolo * 3);
-
-  TemMarteloAlta3 := Alta3 and (MarteloAlta3 > TamanhoTijolo * 1);
-  TemMarteloBaixa3 := Baixa3 and (MarteloBaixa3 > TamanhoTijolo * 1);
-  TemMarteloAlta6 := Alta6 and (MarteloAlta6 > TamanhoTijolo * 3);
-  TemMarteloBaixa6 := Baixa6 and (MarteloBaixa6 > TamanhoTijolo * 3);
 
   StopCompra := Abertura - (TamanhoTijolo * LimiteProtecao);
   StopVenda := Abertura + (TamanhoTijolo * LimiteProtecao);
 
   TemRegiaoCompra :=
-    ((Mm1 > StopVenda) and (Fechamento > Mm1)) or
-    ((Mm2 > StopVenda) and (Fechamento > Mm2)) or
-    ((Mm3 > StopVenda) and (Fechamento > Mm3));
+    ((Mm1 > StopCompra) and (Fechamento > Mm1)) or
+    ((Mm2 > StopCompra) and (Fechamento > Mm2)) or
+    ((Mm3 > StopCompra) and (Fechamento > Mm3));
 
   TemRegiaoVenda :=
     ((Mm1 < StopVenda) and (Abertura < Mm1)) or
@@ -313,13 +281,6 @@ begin
 
   CondicoesCompra := TemEstruturaAlta and TemRegiaoCompra and VerificaStocastico;
   CondicoesVenda := TemEstruturaBaixa and TemRegiaoVenda and VerificaStocastico;
-
-  TamanhoTijolo3 := Abs(Fechamento[3] - Abertura[3]);
-  PavioSuperior3 := Abs(Abertura[3] - Maxima[3]);
-  PavioInferior3 := Abs(Abertura[3] - Minima[3]);
-
-  TemMarteloAlta3 := PavioSuperior3 > TamanhoTijolo3;
-  TemMarteloBaixa3 := PavioInferior3 > TamanhoTijolo3;
 
   TamanhoTijolo6 := Abs(Fechamento[6] - Abertura[6]);
   PavioSuperior6 := Maxima[6] - Max(Abertura[6], Fechamento[6]);
@@ -372,13 +333,22 @@ begin
 
   PadraoVenda_2211 := Baixa0 and Alta1 and Baixa2 and Baixa3 and Alta4 and Alta5 and Baixa6;
 
-  PadraoCompra_YY := Alta0 and (Minima[1] < Minima[5]) and (Maxima[2] >= Maxima) and Alta3 and Alta4 and Alta5;
+  PadraoCompra_YY := Alta0 and 
+    (Minima < Minima[1]) and (Minima < Minima[2]) and (Minima < Minima[3]) and (Minima > Minima[4]) and 
+    (Maxima[1] > Maxima) and (Maxima[1] > Maxima[2]) and
+    Alta3 and Alta4 and Alta5;
 
-  PadraoVenda_YY := Baixa0 and (Maxima[1] < Maxima[5]) and (Minima[2] >= Minima) and Baixa3 and Baixa4 and Baixa5;
+  PadraoVenda_YY := 
+    Baixa0 and 
+    (Maxima > Maxima[1]) and (Maxima > Maxima[2]) and (Maxima > Maxima[3]) and (Maxima < Maxima[4]) and 
+    (Minima[1] < Minima) and (Minima[1] < Minima[2]) and 
+    Baixa3 and Baixa4 and Baixa5;
 
-  PadraoCompra_CXP := Alta0 and Alta1 and Baixa2 and Alta3 and Baixa4 and Alta5 and Alta6;
+  PadraoCompra_CXP := 
+    Alta0 and Alta1 and Baixa2 and Alta3 and Baixa4 and Alta5 and Alta6;
 
-  PadraoVenda_CXP := Baixa0 and Baixa1 and Alta2 and Baixa3 and Alta4 and Baixa5 and Baixa6;    
+  PadraoVenda_CXP := 
+    Baixa0 and Baixa1 and Alta2 and Baixa3 and Alta4 and Baixa5 and Baixa6;    
   
   if MostrarToposFundos then
   begin
@@ -394,109 +364,109 @@ begin
 
   if (Habilita_3x3 = 1) and PadraoCompra_3x3 and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("3x3", clBlue, 0, 8);
   end;
 
   if (Habilita_3x3 = 1) and PadraoVenda_3x3 and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("3x3", clFucsia, 2, 8);
   end;
 
   if (Habilita_FC = 1) and PadraoCompra_FC and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("FC", clBlue, 0, 8);
   end;
 
   if (Habilita_FC = 1) and PadraoVenda_FC and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("FC", clFucsia, 2, 8);
   end;
 
   if (Habilita_211 = 1) and PadraoCompra_211 and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("211", clBlue, 0, 8);
   end;
 
   if (Habilita_211 = 1) and PadraoVenda_211 and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("211", clFucsia, 2, 8);
   end;
 
   if (Habilita_132 = 1) and PadraoCompra_132 and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("132", clBlue, 0, 8);
   end;
 
   if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("132", clFucsia, 2, 8);
   end;
 
   if (Habilita_RC = 1) and PadraoCompra_RC and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("RC", clBlue, 0, 8);
   end;
 
   if (Habilita_RC = 1) and PadraoVenda_RC and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("RC", clFucsia, 2, 8);
   end;
 
   if (Habilita_F2R = 1) and PadraoCompra_F2R and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("F2R", clBlue, 0, 8);
   end;
 
   if (Habilita_F2R = 1) and PadraoVenda_F2R and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("F2R", clFucsia, 2, 8);
   end;
 
   if (Habilita_2211 = 1) and PadraoCompra_2211 and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("2211", clBlue, 0, 8);
   end;
 
   if (Habilita_2211 = 1) and PadraoVenda_2211 and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("2211", clFucsia, 2, 8);
   end;
 
   if (Habilita_YY = 1) and PadraoCompra_YY and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("YY", clBlue, 0, 8);
   end;
 
   if (Habilita_YY = 1) and PadraoVenda_YY and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("YY", clFucsia, 2, 8);
   end;
 
   if (Habilita_CXP = 1) and PadraoCompra_CXP and CondicoesCompra then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("CXP", clBlue, 0, 8);
   end;
 
   if (Habilita_CXP = 1) and PadraoVenda_CXP and CondicoesVenda then
   begin
-    Alert(clYellow);
+    //Alert(clYellow);
     PlotText("CXP", clFucsia, 2, 8);
   end;    
 
