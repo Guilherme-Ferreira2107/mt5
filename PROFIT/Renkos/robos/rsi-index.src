@@ -1,0 +1,232 @@
+Parametro
+  Stop(0.25);
+  Take(6.0);
+  
+  PeriodoRSI(14);  
+  MultiplicadorPavio(1.0);
+
+var
+  TamanhoTijolo, StopCompra, StopVenda : real;
+  corAtual : integer;
+
+  // Novo padrão RSI
+  RSI_Valor : real;
+  EstadoRSI : integer;
+  Topo1RSI, Topo2RSI, FundoRSI : real;
+  PadraoVenda_RSI : boolean;  
+
+  // Novo padrão RSI para compra
+  EstadoRSI_Compra : integer;
+  Fundo1RSI, Fundo2RSI, TopoRSI : real;
+  PadraoCompra_RSI : boolean;  
+
+  CondicoesCompra, CondicoesVenda : boolean;
+
+  PrecoEntradaLong, PrecoEntradaShort : real;
+  StopAtualLong, StopAtualShort : real;
+  MaiorStopLong, MaiorStopShort : real;
+
+  // Contadores para stops progressivos
+  ContadorVelasGanhoLong, ContadorVelasGanhoShort : integer;
+
+begin
+  RSI_Valor := RSI(PeriodoRSI, 0);  // Tipo 0: Clássico
+
+  // Manter valores RSI
+  EstadoRSI := EstadoRSI[1];
+  Topo1RSI := Topo1RSI[1];
+  Topo2RSI := Topo2RSI[1];
+  FundoRSI := FundoRSI[1];
+
+  // Manter valores RSI para compra
+  EstadoRSI_Compra := EstadoRSI_Compra[1];
+  Fundo1RSI := Fundo1RSI[1];
+  Fundo2RSI := Fundo2RSI[1];
+  TopoRSI := TopoRSI[1];
+
+  // Lógica do padrão RSI para venda
+  PadraoVenda_RSI := false;  // Reset sinal
+  if EstadoRSI = 0 then
+  begin
+    if RSI_Valor > 70 then
+    begin
+      Topo1RSI := RSI_Valor;
+      EstadoRSI := 1;
+    end;
+  end
+  else if EstadoRSI = 1 then
+  begin
+    if RSI_Valor < 70 then
+    begin
+      FundoRSI := RSI_Valor;
+      EstadoRSI := 2;
+    end;
+  end
+  else if EstadoRSI = 2 then
+  begin
+    if RSI_Valor > FundoRSI then
+    begin
+      Topo2RSI := RSI_Valor;
+      if Topo2RSI < Topo1RSI then
+        EstadoRSI := 3
+      else
+        EstadoRSI := 0;  // Reset se não for lower high
+    end;
+  end
+  else if EstadoRSI = 3 then
+  begin
+    if RSI_Valor < FundoRSI then
+    begin
+      PadraoVenda_RSI := true;
+      EstadoRSI := 0;  // Reset após sinal
+    end;
+  end;
+
+  // Lógica do padrão RSI para compra (Higher Low)
+  PadraoCompra_RSI := false;  // Reset sinal
+  if EstadoRSI_Compra = 0 then
+  begin
+    if RSI_Valor < 30 then
+    begin
+      Fundo1RSI := RSI_Valor;
+      EstadoRSI_Compra := 1;
+    end;
+  end
+  else if EstadoRSI_Compra = 1 then
+  begin
+    if RSI_Valor > 30 then
+    begin
+      TopoRSI := RSI_Valor;
+      EstadoRSI_Compra := 2;
+    end;
+  end
+  else if EstadoRSI_Compra = 2 then
+  begin
+    if RSI_Valor < TopoRSI then
+    begin
+      Fundo2RSI := RSI_Valor;
+      if Fundo2RSI > Fundo1RSI then
+        EstadoRSI_Compra := 3
+      else
+        EstadoRSI_Compra := 0;  // Reset se não for higher low
+    end;
+  end
+  else if EstadoRSI_Compra = 3 then
+  begin
+    if RSI_Valor > TopoRSI then
+    begin
+      PadraoCompra_RSI := true;
+      EstadoRSI_Compra := 0;  // Reset após sinal
+    end;
+  end;
+
+  TamanhoTijolo := Abs(Fechamento - Abertura);
+
+  StopCompra := Abertura - (TamanhoTijolo);
+  StopVenda := Abertura + (TamanhoTijolo);
+
+  CondicoesCompra := true;  // Ajustar conforme necessário
+  CondicoesVenda := true;   // Ajustar conforme necessário
+
+  // Pintura dos candles baseada no RSI
+  if RSI_Valor > 70 then
+    PaintBar(clRed)  // Sobrecompra
+  else if RSI_Valor < 30 then
+    PaintBar(clGreen)  // Sobrevenda
+  else
+    PaintBar(clSilver);  // Neutro
+
+  // PlotText para padrões
+  if PadraoVenda_RSI then
+    PlotText("RSI_V", clFucsia, 2, 8);
+
+  if PadraoCompra_RSI then
+    PlotText("RSI_C", clBlue, 0, 8);
+
+  { =========================================================
+    Gerenciamento de Posições com Trailing Stop
+    ========================================================= }
+  
+  { Mantém valores anteriores }
+  PrecoEntradaLong  := PrecoEntradaLong[1];
+  PrecoEntradaShort := PrecoEntradaShort[1];
+  MaiorStopLong     := MaiorStopLong[1];
+  MaiorStopShort    := MaiorStopShort[1];  
+
+  // Manter contadores
+  ContadorVelasGanhoLong := ContadorVelasGanhoLong[1];
+  ContadorVelasGanhoShort := ContadorVelasGanhoShort[1];  
+  
+  { Gerenciamento de posição LONG }
+  if (IsBought) then
+  begin
+    { Captura preço na entrada }
+    if (IsBought[1] = false) then
+    begin
+      PrecoEntradaLong := Price;
+      MaiorStopLong := Price - (TamanhoTijolo * Stop);  { Stop inicial }
+      ContadorVelasGanhoLong := 0;  // Reset contador na entrada
+    end;  
+    
+    { Atualizar contador de velas de ganho }
+    if (Fechamento > Fechamento[1]) then
+      ContadorVelasGanhoLong := ContadorVelasGanhoLong + 1
+    else
+      ContadorVelasGanhoLong := 0;
+    
+    { CRÍTICO: Stop só pode subir, nunca descer }
+    if (StopAtualLong > MaiorStopLong) then
+      MaiorStopLong := StopAtualLong; 
+    
+    SellToCoverStop(MaiorStopLong);
+    SellToCoverLimit(Price + (TamanhoTijolo * Take));
+
+        
+    if (Price <= MaiorStopLong) then
+    begin
+      SellToCoverAtMarket;
+    end;
+  end
+  
+  { Gerenciamento de posição SHORT }
+  else if (IsSold) then
+  begin
+    { Captura preço na entrada }
+    if (IsSold[1] = false) then
+    begin
+      PrecoEntradaShort := Price;
+      MaiorStopShort := Price + (TamanhoTijolo * Stop);  { Stop inicial }
+      ContadorVelasGanhoShort := 0;  // Reset contador na entrada
+    end; 
+    
+    { Atualizar contador de velas de ganho }
+    if (Fechamento < Fechamento[1]) then
+      ContadorVelasGanhoShort := ContadorVelasGanhoShort + 1
+    else
+      ContadorVelasGanhoShort := 0;
+    
+    { CRÍTICO: Stop só pode descer, nunca subir }
+    if (StopAtualShort < MaiorStopShort) then
+      MaiorStopShort := StopAtualShort; 
+    
+    BuyToCoverStop(MaiorStopShort);
+    BuyToCoverLimit(Price - (TamanhoTijolo * Take));
+
+        
+    if (Price >= MaiorStopShort) then
+    begin
+      BuyToCoverAtMarket;
+    end;
+  end;  
+  
+    { =========================================================
+    Entradas
+    ========================================================= }
+  if (not IsBought) and (not IsSold) and CondicoesCompra and
+    PadraoCompra_RSI then 
+      BuyAtMarket;
+
+  if (not IsBought) and (not IsSold) and CondicoesVenda and
+    PadraoVenda_RSI then
+      SellShortAtMarket;   
+end;

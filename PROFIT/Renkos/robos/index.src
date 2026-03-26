@@ -219,17 +219,11 @@ begin
     topo2 := fUltimoTopoConfirmado;
   end;
 
-  TemEstruturaAlta := (topo2 > topo1) and (fundo2 > fundo1) and (Abertura > fundo2);
-  TemEstruturaBaixa := (topo2 < topo1) and (fundo2 < fundo1) and (Abertura < topo2);
+  TemEstruturaAlta := ((topo2 > topo1) or (fundo2 > fundo1)) and (Abertura > fundo2) and (fundo2 > fundo1);
+  TemEstruturaBaixa := ((fundo2 < fundo1) or (topo2 < topo1)) and (Abertura < topo2) and (topo2 < topo1);
 
   MostrarMedias := (ExibirTudo = 1) or (ExibirMedias = 1);
-  MostrarStocastico := (ExibirTudo = 1) or (ExibirStocastico = 1);
   MostrarToposFundos := (ExibirTudo = 1) or (ExibirToposFundos = 1);
-
-  if MostrarStocastico then
-    Plot(StoK)
-  else
-    NoPlot(1);
 
   if MostrarMedias then
   begin
@@ -357,118 +351,66 @@ begin
     if TemEstruturaAlta then
       corAtual := clVerde
     else if TemEstruturaBaixa then
-      corAtual := clVermelho;
+      corAtual := clVermelho
+    else if TemEstruturaAlta and TemEstruturaBaixa then
+      corAtual := clAmarelo; 
 
     PaintBar(corAtual);
   end;
 
   if (Habilita_3x3 = 1) and PadraoCompra_3x3 and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("3x3", clBlue, 0, 8);
-  end;
 
   if (Habilita_3x3 = 1) and PadraoVenda_3x3 and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("3x3", clFucsia, 2, 8);
-  end;
 
   if (Habilita_FC = 1) and PadraoCompra_FC and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("FC", clBlue, 0, 8);
-  end;
 
   if (Habilita_FC = 1) and PadraoVenda_FC and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("FC", clFucsia, 2, 8);
-  end;
 
   if (Habilita_211 = 1) and PadraoCompra_211 and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("211", clBlue, 0, 8);
-  end;
 
   if (Habilita_211 = 1) and PadraoVenda_211 and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("211", clFucsia, 2, 8);
-  end;
 
   if (Habilita_132 = 1) and PadraoCompra_132 and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("132", clBlue, 0, 8);
-  end;
 
   if (Habilita_132 = 1) and PadraoVenda_132 and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("132", clFucsia, 2, 8);
-  end;
 
   if (Habilita_RC = 1) and PadraoCompra_RC and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("RC", clBlue, 0, 8);
-  end;
 
   if (Habilita_RC = 1) and PadraoVenda_RC and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("RC", clFucsia, 2, 8);
-  end;
 
   if (Habilita_F2R = 1) and PadraoCompra_F2R and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("F2R", clBlue, 0, 8);
-  end;
 
   if (Habilita_F2R = 1) and PadraoVenda_F2R and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("F2R", clFucsia, 2, 8);
-  end;
 
   if (Habilita_2211 = 1) and PadraoCompra_2211 and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("2211", clBlue, 0, 8);
-  end;
 
   if (Habilita_2211 = 1) and PadraoVenda_2211 and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("2211", clFucsia, 2, 8);
-  end;
 
   if (Habilita_YY = 1) and PadraoCompra_YY and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("YY", clBlue, 0, 8);
-  end;
 
   if (Habilita_YY = 1) and PadraoVenda_YY and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("YY", clFucsia, 2, 8);
-  end;
 
   if (Habilita_CXP = 1) and PadraoCompra_CXP and CondicoesCompra then
-  begin
-    //Alert(clYellow);
     PlotText("CXP", clBlue, 0, 8);
-  end;
 
   if (Habilita_CXP = 1) and PadraoVenda_CXP and CondicoesVenda then
-  begin
-    //Alert(clYellow);
     PlotText("CXP", clFucsia, 2, 8);
-  end;    
 
   { =========================================================
     Gerenciamento de Posições com Trailing Stop

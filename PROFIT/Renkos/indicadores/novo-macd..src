@@ -1,0 +1,24 @@
+var
+  vMacd : float;
+  ultimoTopo, ultimoFundo : float;
+
+begin
+  vMacd := MACD(72,34,17)|1|;
+
+  if (vMacd < vMacd[1]) and (vMacd[1] > vMacd[2]) then
+  begin
+    ultimoTopo := vMacd[1];
+    PlotText("Valor: " + ultimoTopo, clBlue, 0, 8);
+    // PaintBar(clYellow);
+  end;
+
+  if (vMacd > vMacd[1]) and (vMacd[1] < vMacd[2]) then
+  begin
+    ultimoTopo := vMacd[1];
+    PlotText("Valor: " + ultimoTopo, clFucsia, 2, 8);
+    // PaintBar(clYellow);
+  end;
+    
+
+  Plot(vMacd);
+end;
