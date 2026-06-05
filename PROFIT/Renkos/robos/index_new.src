@@ -1,6 +1,6 @@
 Parametro
   Stop(0.25);
-  Take(6.0);
+  Take(3.0);
 
   PeriodoRSI(14);
   MultiplicadorPavio(1.0);
@@ -18,7 +18,6 @@ var
   CondicoesCompra, CondicoesVenda : boolean;
 
   PrecoEntradaLong, PrecoEntradaShort : real;
-  StopAtualLong, StopAtualShort : real;
   MaiorStopLong, MaiorStopShort : real;
 
   // Contadores para stops progressivos
@@ -34,7 +33,7 @@ begin
   TamanhoTijolo := Abs(Fechamento - Abertura);
 
   StopCompra := Abertura - (TamanhoTijolo);
-  StopVenda := Abertura + (TamanhoTijolo);
+  StopVenda := Abertura + (TamanhoTijolo);  
 
   CondicoesCompra := true;  // Ajustar conforme necessário
   CondicoesVenda := true;   // Ajustar conforme necessário
@@ -85,18 +84,12 @@ begin
     else
       ContadorVelasGanhoLong := 0;
     
-    { CRÍTICO: Stop só pode subir, nunca descer }
-    if (StopAtualLong > MaiorStopLong) then
-      MaiorStopLong := StopAtualLong; 
-    
     SellToCoverStop(MaiorStopLong);
     SellToCoverLimit(Price + (TamanhoTijolo * Take));
 
-        
-    if (Price <= MaiorStopLong) then
-    begin
+    { Fallback: encerra a mercado se o tijolo fechou abaixo do stop }
+    if (Fechamento <= MaiorStopLong) then
       SellToCoverAtMarket;
-    end;
   end
   
   { Gerenciamento de posição SHORT }
@@ -116,18 +109,12 @@ begin
     else
       ContadorVelasGanhoShort := 0;
     
-    { CRÍTICO: Stop só pode descer, nunca subir }
-    if (StopAtualShort < MaiorStopShort) then
-      MaiorStopShort := StopAtualShort; 
-    
     BuyToCoverStop(MaiorStopShort);
     BuyToCoverLimit(Price - (TamanhoTijolo * Take));
 
-        
-    if (Price >= MaiorStopShort) then
-    begin
+    { Fallback: encerra a mercado se o tijolo fechou acima do stop }
+    if (Fechamento >= MaiorStopShort) then
       BuyToCoverAtMarket;
-    end;
   end;  
   
     { =========================================================

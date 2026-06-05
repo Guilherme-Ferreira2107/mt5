@@ -1,0 +1,141 @@
+Parametro
+  Stop(0.25);
+  Take(3.0);
+
+  PeriodoRSI(3);
+  NivelVenda(96);   // Candle anterior acima -> atual abaixo = vende
+  NivelCompra(4);   // Candle anterior abaixo -> atual acima = compra
+
+  PeriodoKeltner(20);
+  MultiplKeltner(2.0);
+  MediaTijolo(10);
+
+  AtivarGerenciamento(False);
+
+var
+  TamanhoTijolo, MediaTamanhoTijolo : real;
+  TijoloFiltrado                    : boolean;
+
+  RSI_Valor                          : real;
+  PadraoVenda_RSI, PadraoCompra_RSI  : boolean;
+
+  KeltnerMedio, KeltnerSup, KeltnerInf : real;
+  TendenciaEMA                         : integer;
+
+  HoraAtual    : integer;
+  DentroJanela : boolean;
+
+  CondicoesCompra, CondicoesVenda : boolean;
+
+  PrecoEntradaLong, PrecoEntradaShort : real;
+  MaiorStopLong, MaiorStopShort       : real;
+
+begin
+  // Indicadores
+  RSI_Valor := RSI(PeriodoRSI, 0);
+
+  KeltnerMedio := Media(PeriodoKeltner, Fechamento);
+  KeltnerSup   := KeltnerMedio + (MultiplKeltner * MediaATR(PeriodoKeltner));
+  KeltnerInf   := KeltnerMedio - (MultiplKeltner * MediaATR(PeriodoKeltner));
+
+  TamanhoTijolo      := Abs(Fechamento - Abertura);
+  MediaTamanhoTijolo := Media(MediaTijolo, TamanhoTijolo);
+  TijoloFiltrado     := TamanhoTijolo >= MediaTamanhoTijolo;
+
+  // Direcao da EMA central
+  if KeltnerMedio > KeltnerMedio[3] then TendenciaEMA := 1
+  else if KeltnerMedio < KeltnerMedio[3] then TendenciaEMA := -1
+  else TendenciaEMA := 0;
+
+  // Filtro de horario (bloqueia 6h, 13h, 14h, 21h)
+  HoraAtual := Hour(Now);
+  DentroJanela := not (
+    (HoraAtual = 6)  or
+    (HoraAtual = 13) or
+    (HoraAtual = 14) or
+    (HoraAtual = 21)
+  );
+
+  // Gatilhos RSI
+  PadraoVenda_RSI  := (RSI_Valor[1] > NivelVenda)  and (RSI_Valor < NivelVenda);
+  PadraoCompra_RSI := (RSI_Valor[1] < NivelCompra) and (RSI_Valor > NivelCompra);
+
+  // Confluencia
+  CondicoesCompra :=
+    DentroJanela          and
+    TijoloFiltrado        and
+    (Minima <= KeltnerInf)    and
+    (Fechamento > KeltnerInf) and
+    (TendenciaEMA <> 1);
+
+  CondicoesVenda :=
+    DentroJanela          and
+    TijoloFiltrado        and
+    (Maxima >= KeltnerSup)    and
+    (Fechamento < KeltnerSup) and
+    (TendenciaEMA <> -1);
+
+  // Pintura visual
+  if RSI_Valor > NivelVenda then
+    PaintBar(clRed)
+  else if RSI_Valor < NivelCompra then
+    PaintBar(clGreen)
+  else
+    PaintBar(clSilver);
+
+  if PadraoVenda_RSI  then PlotText("QB_V", clFucsia, 2, 8);
+  if PadraoCompra_RSI then PlotText("QB_C", clBlue,   0, 8);
+
+  // Preservar estado entre candles
+  PrecoEntradaLong  := PrecoEntradaLong[1];
+  PrecoEntradaShort := PrecoEntradaShort[1];
+  MaiorStopLong     := MaiorStopLong[1];
+  MaiorStopShort    := MaiorStopShort[1];
+
+  // Gerenciamento LONG
+  if (IsBought and AtivarGerenciamento) then
+  begin
+    if (IsBought[1] = false) then
+    begin
+      PrecoEntradaLong := Price;
+      MaiorStopLong    := Price - (TamanhoTijolo * Stop);
+    end;
+
+    // Trailing: stop sobe conforme preco avanca
+    if (Price - (TamanhoTijolo * Stop)) > MaiorStopLong then
+      MaiorStopLong := Price - (TamanhoTijolo * Stop);
+
+    SellToCoverStop(MaiorStopLong);
+    SellToCoverLimit(Price + (TamanhoTijolo * Take));
+
+    if (Fechamento <= MaiorStopLong) then
+      SellToCoverAtMarket;
+  end
+
+  // Gerenciamento SHORT
+  else if (IsSold and AtivarGerenciamento) then
+  begin
+    if (IsSold[1] = false) then
+    begin
+      PrecoEntradaShort := Price;
+      MaiorStopShort    := Price + (TamanhoTijolo * Stop);
+    end;
+
+    // Trailing: stop cai conforme preco cai
+    if (Price + (TamanhoTijolo * Stop)) < MaiorStopShort then
+      MaiorStopShort := Price + (TamanhoTijolo * Stop);
+
+    BuyToCoverStop(MaiorStopShort);
+    BuyToCoverLimit(Price - (TamanhoTijolo * Take));
+
+    if (Fechamento >= MaiorStopShort) then
+      BuyToCoverAtMarket;
+  end;
+
+  // Entradas
+  if (not IsBought) and (not IsSold) and CondicoesCompra and PadraoCompra_RSI then
+    BuyAtMarket;
+
+  if (not IsBought) and (not IsSold) and CondicoesVenda and PadraoVenda_RSI then
+    SellShortAtMarket;
+end;

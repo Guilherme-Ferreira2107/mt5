@@ -1,0 +1,366 @@
+//@version=6
+strategy(
+     title             = "SEPA VCP Robot — EURUSD H4",
+     shorttitle        = "VCP Robot",
+     overlay           = true,
+     initial_capital   = 10000,
+     currency          = currency.USD,
+     default_qty_type  = strategy.fixed,
+     default_qty_value = 1,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.007,
+     slippage          = 2,
+     max_bars_back     = 500
+     )
+
+// ══════════════════════════════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════════════════════════════
+
+// ── Trend Template ───────────────────────────────────────────
+ma50Len       = input.int(50,  title = "MA 50",            group = "Trend Template", minval = 1)
+ma150Len      = input.int(150, title = "MA 150",           group = "Trend Template", minval = 1)
+ma200Len      = input.int(200, title = "MA 200",           group = "Trend Template", minval = 1)
+ma200SlopeLen = input.int(20,  title = "MA 200 slope (candles)", group = "Trend Template", minval = 1)
+ttMinScore    = input.int(6,   title = "Score mínimo (0–6)", group = "Trend Template", minval = 1, maxval = 6,
+     tooltip = "6 = todos os critérios obrigatórios. Reduza para testar setups parciais.")
+
+// ── VCP ──────────────────────────────────────────────────────
+vcpSwingLen    = input.int(5,    title = "Swing lookback",          group = "VCP", minval = 2)
+vcpContractions = input.int(3,   title = "Contrações mínimas",      group = "VCP", minval = 2, maxval = 4)
+vcpAtrLen      = input.int(14,   title = "ATR período",             group = "VCP", minval = 1)
+vcpAtrSmooth   = input.int(5,    title = "ATR suavização",          group = "VCP", minval = 1)
+vcpVolLen      = input.int(20,   title = "Volume médio (períodos)", group = "VCP", minval = 1)
+vcpVolThresh   = input.float(0.8, title = "Volume seco (% média)",  group = "VCP", step = 0.05, minval = 0.1)
+
+// ── Breakout ─────────────────────────────────────────────────
+brkVolMult = input.float(1.4, title = "Volume mínimo (× média)", group = "Breakout", step = 0.1)
+brkBodyMult = input.float(0.3, title = "Corpo mínimo (× ATR)",   group = "Breakout", step = 0.05)
+
+// ── Stop & Alvo ───────────────────────────────────────────────
+rrRatio  = input.float(2.5,  title = "Risco/Retorno (R)",        group = "Stop & Alvo", step = 0.5, minval = 1.0)
+slOffset = input.float(0.1,  title = "Stop offset (%)",          group = "Stop & Alvo", step = 0.05)
+
+// ── Gestão de Capital ─────────────────────────────────────────
+riskPct      = input.float(1.0,  title = "Risco por trade (%)",        group = "Gestão de Capital", step = 0.1, minval = 0.1, maxval = 5.0,
+     tooltip = "Percentual do capital total arriscado por operação. Default: 1%.")
+maxPositions = input.int(1,      title = "Máximo de posições abertas",  group = "Gestão de Capital", minval = 1, maxval = 5,
+     tooltip = "1 = uma posição por vez (default). Aumente para permitir múltiplas entradas simultâneas.")
+
+// ── Sessão ────────────────────────────────────────────────────
+useSession     = input.bool(true,         title = "Filtrar por sessão",          group = "Sessão")
+sessionLondon  = input.session("0700-1600", title = "Londres (UTC)",             group = "Sessão")
+sessionNY      = input.session("1200-2100", title = "Nova York (UTC)",           group = "Sessão")
+closeEod       = input.bool(false,         title = "Fechar posições fora da sessão", group = "Sessão",
+     tooltip = "Se ativado, fecha todas as posições quando o mercado sai das sessões configuradas.")
+
+// ── Direção ───────────────────────────────────────────────────
+tradeDir = input.string("Ambos", title = "Direção", group = "Operações",
+     options = ["Ambos", "Apenas Long", "Apenas Short"])
+
+// ── Visual ────────────────────────────────────────────────────
+showMAs      = input.bool(true,  title = "Mostrar MAs",          group = "Visual")
+showVcpZone  = input.bool(true,  title = "Mostrar zona VCP",     group = "Visual")
+showLevels   = input.bool(true,  title = "Mostrar Stop/Alvo",    group = "Visual")
+showSignals  = input.bool(true,  title = "Mostrar sinais",       group = "Visual")
+showPanel    = input.bool(true,  title = "Mostrar painel",       group = "Visual")
+
+// ══════════════════════════════════════════════════════════════
+// SESSÃO
+// ══════════════════════════════════════════════════════════════
+inLondon  = not useSession or time(timeframe.period, sessionLondon) != 0
+inNY      = not useSession or time(timeframe.period, sessionNY)     != 0
+inSession = inLondon or inNY
+
+// ══════════════════════════════════════════════════════════════
+// TREND TEMPLATE
+// ══════════════════════════════════════════════════════════════
+ma50  = ta.ema(close, ma50Len)
+ma150 = ta.ema(close, ma150Len)
+ma200 = ta.ema(close, ma200Len)
+
+ma200Rising = ma200 > ma200[ma200SlopeLen]
+ma200Falling = ma200 < ma200[ma200SlopeLen]
+
+// Bull criteria
+tt1 = close > ma50
+tt2 = close > ma150
+tt3 = close > ma200
+tt4 = ma50  > ma150
+tt5 = ma150 > ma200
+tt6 = ma200Rising
+
+// Bear criteria
+tt1s = close < ma50
+tt2s = close < ma150
+tt3s = close < ma200
+tt4s = ma50  < ma150
+tt5s = ma150 < ma200
+tt6s = ma200Falling
+
+ttScoreBull  = (tt1?1:0)+(tt2?1:0)+(tt3?1:0)+(tt4?1:0)+(tt5?1:0)+(tt6?1:0)
+ttScoreBear  = (tt1s?1:0)+(tt2s?1:0)+(tt3s?1:0)+(tt4s?1:0)+(tt5s?1:0)+(tt6s?1:0)
+
+trendLong  = ttScoreBull  >= ttMinScore
+trendShort = ttScoreBear  >= ttMinScore
+
+allowLong  = trendLong  and (tradeDir == "Ambos" or tradeDir == "Apenas Long")
+allowShort = trendShort and (tradeDir == "Ambos" or tradeDir == "Apenas Short")
+
+// ══════════════════════════════════════════════════════════════
+// MAs VISUAIS
+// ══════════════════════════════════════════════════════════════
+plot(showMAs ? ma50  : na, title = "MA 50",  color = color.new(#00bcd4, 0), linewidth = 1)
+plot(showMAs ? ma150 : na, title = "MA 150", color = color.new(#ff9800, 0), linewidth = 1)
+plot(showMAs ? ma200 : na, title = "MA 200",
+     color = trendLong ? color.new(#00c853, 0) : trendShort ? color.new(#ff1744, 0) : color.new(#787b86, 0),
+     linewidth = 2)
+
+// ══════════════════════════════════════════════════════════════
+// ATR E VOLUME
+// ══════════════════════════════════════════════════════════════
+atr    = ta.atr(vcpAtrLen)
+atrSma = ta.sma(atr, vcpAtrSmooth)
+volSma = ta.sma(volume, vcpVolLen)
+
+// ══════════════════════════════════════════════════════════════
+// VCP — DETECÇÃO DE CONTRAÇÕES
+// ══════════════════════════════════════════════════════════════
+swingH = ta.pivothigh(high, vcpSwingLen, vcpSwingLen)
+swingL = ta.pivotlow(low,   vcpSwingLen, vcpSwingLen)
+
+var float[] shArr = array.new_float(4, na)
+var float[] slArr = array.new_float(4, na)
+
+if not na(swingH)
+    array.unshift(shArr, swingH)
+    if array.size(shArr) > 4
+        array.pop(shArr)
+
+if not na(swingL)
+    array.unshift(slArr, swingL)
+    if array.size(slArr) > 4
+        array.pop(slArr)
+
+// Ranges entre pivots consecutivos
+r1 = not na(array.get(shArr,0)) and not na(array.get(slArr,0)) ? math.abs(array.get(shArr,0)-array.get(slArr,0)) : na
+r2 = not na(array.get(shArr,1)) and not na(array.get(slArr,1)) ? math.abs(array.get(shArr,1)-array.get(slArr,1)) : na
+r3 = not na(array.get(shArr,2)) and not na(array.get(slArr,2)) ? math.abs(array.get(shArr,2)-array.get(slArr,2)) : na
+r4 = not na(array.get(shArr,3)) and not na(array.get(slArr,3)) ? math.abs(array.get(shArr,3)-array.get(slArr,3)) : na
+
+c2 = not na(r1) and not na(r2) and r1 < r2
+c3 = c2 and not na(r3) and r2 < r3
+c4 = c3 and not na(r4) and r3 < r4
+
+vcpContracted = vcpContractions == 2 ? c2 : vcpContractions == 3 ? c3 : c4
+
+volDry         = volume < volSma * vcpVolThresh
+atrContracting = atr < atrSma
+vcpActive      = vcpContracted and volDry and atrContracting
+
+// Pivot atual
+pivotHigh = not na(array.get(shArr, 0)) ? array.get(shArr, 0) : na
+pivotLow  = not na(array.get(slArr, 0)) ? array.get(slArr, 0) : na
+
+// ══════════════════════════════════════════════════════════════
+// ZONA VCP VISUAL
+// ══════════════════════════════════════════════════════════════
+p_vcpT = plot(showVcpZone and vcpActive and not na(pivotHigh) ? pivotHigh : na,
+     title = "VCP Top", color = color.new(#ffeb3b, 100), style = plot.style_linebr)
+p_vcpB = plot(showVcpZone and vcpActive and not na(pivotLow)  ? pivotLow  : na,
+     title = "VCP Bot", color = color.new(#ffeb3b, 100), style = plot.style_linebr)
+fill(p_vcpT, p_vcpB, vcpActive ? color.new(#ffeb3b, 90) : na, "VCP Fill")
+
+barcolor(vcpActive and strategy.position_size == 0 ? color.new(#ffeb3b, 70) : na)
+
+// ══════════════════════════════════════════════════════════════
+// BREAKOUT
+// ══════════════════════════════════════════════════════════════
+candleBody  = math.abs(close - open)
+volExpanded = volume > volSma * brkVolMult
+bodyStrong  = candleBody >= atr * brkBodyMult
+
+breakoutLong  = not na(pivotHigh) and close > pivotHigh and close > open and volExpanded and bodyStrong and vcpContracted
+breakoutShort = not na(pivotLow)  and close < pivotLow  and close < open and volExpanded and bodyStrong and vcpContracted
+
+// ══════════════════════════════════════════════════════════════
+// GESTÃO DE CAPITAL — POSITION SIZING POR RISCO %
+//
+// Fórmula:
+//   Risco ($)  = Capital × riskPct / 100
+//   Stop (pts) = |entrada - stop|
+//   Qty        = Risco ($) / Stop ($)
+//
+// O ajuste real de lote é feito no webhook → broker.
+// ══════════════════════════════════════════════════════════════
+stopLong  = not na(pivotLow)  ? pivotLow  * (1 - slOffset / 100) : na
+stopShort = not na(pivotHigh) ? pivotHigh * (1 + slOffset / 100) : na
+
+riskLong   = not na(stopLong)  ? math.abs(close - stopLong)  : na
+riskShort  = not na(stopShort) ? math.abs(close - stopShort) : na
+
+targetLong  = not na(riskLong)  ? close + riskLong  * rrRatio : na
+targetShort = not na(riskShort) ? close - riskShort * rrRatio : na
+
+// Qty dinâmica por risco %
+// Fórmula: qty = (capital * riskPct%) / stop_em_pontos
+// Para EURUSD no TradingView, qty = unidades (1 unidade = $1 por pip de 0.0001)
+riskCapital  = strategy.equity * riskPct / 100
+calcQtyLong  = not na(riskLong)  and riskLong  > 0 ? riskCapital / riskLong  : 1.0
+calcQtyShort = not na(riskShort) and riskShort > 0 ? riskCapital / riskShort : 1.0
+
+// Limita qty máxima — proteção contra stops muito pequenos
+maxQtyUnits = strategy.equity * 0.20 / close
+qtyLong     = math.max(1.0, math.min(calcQtyLong,  maxQtyUnits))
+qtyShort    = math.max(1.0, math.min(calcQtyShort, maxQtyUnits))
+
+// ══════════════════════════════════════════════════════════════
+// CONTROLE DE POSIÇÕES ABERTAS
+// ══════════════════════════════════════════════════════════════
+openPositions = strategy.opentrades
+canOpen       = openPositions < maxPositions
+
+// ══════════════════════════════════════════════════════════════
+// CONDIÇÕES FINAIS DE ENTRADA
+// ══════════════════════════════════════════════════════════════
+enterLong  = breakoutLong  and allowLong  and inSession and canOpen and not na(stopLong)  and not na(targetLong)
+enterShort = breakoutShort and allowShort and inSession and canOpen and not na(stopShort) and not na(targetShort)
+
+// Fecha posições fora da sessão (opcional)
+if closeEod and not inSession and strategy.position_size != 0
+    strategy.close_all(comment = "Fim da sessão")
+
+// ══════════════════════════════════════════════════════════════
+// EXECUÇÃO
+// ══════════════════════════════════════════════════════════════
+if enterLong
+    strategy.entry("Long", strategy.long, qty = qtyLong,
+         comment = "VCP BUY | SL:" + str.tostring(math.round(stopLong, 5)) + " | TP:" + str.tostring(math.round(targetLong, 5)))
+    strategy.exit("XL", from_entry = "Long",
+         stop           = stopLong,
+         limit          = targetLong,
+         comment_loss   = "SL Long",
+         comment_profit = "TP Long")
+
+if enterShort
+    strategy.entry("Short", strategy.short, qty = qtyShort,
+         comment = "VCP SELL | SL:" + str.tostring(math.round(stopShort, 5)) + " | TP:" + str.tostring(math.round(targetShort, 5)))
+    strategy.exit("XS", from_entry = "Short",
+         stop           = stopShort,
+         limit          = targetShort,
+         comment_loss   = "SL Short",
+         comment_profit = "TP Short")
+
+// ══════════════════════════════════════════════════════════════
+// STOPS E ALVOS VISUAIS DA POSIÇÃO ABERTA
+// ══════════════════════════════════════════════════════════════
+var float visStop   = na
+var float visTarget = na
+
+if enterLong
+    visStop   := stopLong
+    visTarget := targetLong
+else if enterShort
+    visStop   := stopShort
+    visTarget := targetShort
+else if strategy.position_size == 0
+    visStop   := na
+    visTarget := na
+
+plot(showLevels and strategy.position_size != 0 ? visStop   : na,
+     title = "Stop Loss",   color = color.new(#ff1744, 0), style = plot.style_linebr, linewidth = 1)
+plot(showLevels and strategy.position_size != 0 ? visTarget : na,
+     title = "Take Profit", color = color.new(#00c853, 0), style = plot.style_linebr, linewidth = 1)
+
+// ══════════════════════════════════════════════════════════════
+// SINAIS VISUAIS
+// ══════════════════════════════════════════════════════════════
+plotshape(showSignals and enterLong,
+     title = "Long", location = location.belowbar, style = shape.triangleup, size = size.normal, color = color.new(#00c853, 0), text = "VCP BUY")
+plotshape(showSignals and enterShort,
+     title = "Short", location = location.abovebar, style = shape.triangledown, size = size.normal, color = color.new(#ff1744, 0), text = "VCP SELL")
+
+// ══════════════════════════════════════════════════════════════
+// PAINEL
+// ══════════════════════════════════════════════════════════════
+var table panel = table.new(position.top_right, 2, 14,
+     bgcolor      = color.new(#1e222d, 10),
+     border_width = 1,
+     border_color = color.new(#363a45, 100))
+
+if barstate.islast and showPanel
+    posColor  = strategy.position_size > 0 ? #00c853 : strategy.position_size < 0 ? #ff1744 : #787b86
+    posText   = strategy.position_size > 0 ? "LONG ▲" : strategy.position_size < 0 ? "SHORT ▼" : "NEUTRO"
+    ttColor   = trendLong ? #00c853 : trendShort ? #ff1744 : #ff9800
+    ttText    = trendLong ? "BULL (" + str.tostring(ttScoreBull) + "/6)" : trendShort ? "BEAR (" + str.tostring(ttScoreBear) + "/6)" : "MISTO"
+    pnlColor  = strategy.netprofit >= 0 ? #00c853 : #ff1744
+
+    table.cell(panel, 0, 0, "SEPA VCP Robot", text_color = #d1d4dc, bgcolor = #2a2e39, text_size = size.small)
+    table.cell(panel, 1, 0, "EURUSD H4",       text_color = #787b86, bgcolor = #2a2e39, text_size = size.small)
+
+    table.cell(panel, 0, 1, "Posição",         text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 1, posText,            text_color = color.new(posColor, 0), text_size = size.small)
+
+    table.cell(panel, 0, 2, "Trend Template",  text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 2, ttText,             text_color = color.new(ttColor, 0), text_size = size.small)
+
+    table.cell(panel, 0, 3, "Sessão",          text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 3, inSession ? "✓ ATIVA" : "✗ FORA",
+         text_color = inSession ? color.new(#00c853, 0) : color.new(#ff1744, 0), text_size = size.small)
+
+    table.cell(panel, 0, 4, "VCP",             text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 4, vcpActive ? "✓ COMPRIMINDO" : "— aguardando",
+         text_color = vcpActive ? color.new(#ffeb3b, 0) : #787b86, text_size = size.small)
+
+    table.cell(panel, 0, 5, "Posições",        text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 5, str.tostring(openPositions) + "/" + str.tostring(maxPositions),
+         text_color = canOpen ? color.new(#00c853, 0) : color.new(#ff1744, 0), text_size = size.small)
+
+    table.cell(panel, 0, 6, "Risco/trade",     text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 6, str.tostring(riskPct) + "%",
+         text_color = #d1d4dc, text_size = size.small)
+
+    table.cell(panel, 0, 7, "RR Alvo",         text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 7, str.tostring(rrRatio) + "R",
+         text_color = #d1d4dc, text_size = size.small)
+
+    table.cell(panel, 0, 8, "— Resultados —",  text_color = #363a45, bgcolor = #2a2e39, text_size = size.tiny)
+    table.cell(panel, 1, 8, "",                 text_color = #363a45, bgcolor = #2a2e39, text_size = size.tiny)
+
+    table.cell(panel, 0, 9,  "Net PnL",        text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 9,  str.tostring(math.round(strategy.netprofit, 2)),
+         text_color = color.new(pnlColor, 0), text_size = size.small)
+
+    table.cell(panel, 0, 10, "Win Rate",        text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 10, strategy.closedtrades > 0
+         ? str.tostring(math.round(strategy.wintrades / strategy.closedtrades * 100, 1)) + "%"
+         : "—",
+         text_color = #d1d4dc, text_size = size.small)
+
+    table.cell(panel, 0, 11, "Trades",          text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 11, str.tostring(strategy.closedtrades),
+         text_color = #d1d4dc, text_size = size.small)
+
+    table.cell(panel, 0, 12, "Stop",            text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 12, not na(visStop)   ? str.tostring(math.round(visStop,   5)) : "—",
+         text_color = color.new(#ff1744, 0), text_size = size.small)
+
+    table.cell(panel, 0, 13, "Alvo",            text_color = #787b86, text_size = size.small)
+    table.cell(panel, 1, 13, not na(visTarget) ? str.tostring(math.round(visTarget, 5)) : "—",
+         text_color = color.new(#00c853, 0), text_size = size.small)
+
+// ══════════════════════════════════════════════════════════════
+// ALERTAS — compatíveis com PineConnector / webhook
+// Formato: "ID,ação,símbolo,risco,sl,tp"
+// ══════════════════════════════════════════════════════════════
+alertcondition(enterLong,
+     title   = "VCP Long — Entrada",
+     message = '{"action":"buy","symbol":"EURUSD","risk":' + str.tostring(riskPct) + ',"sl":' + str.tostring(math.round(stopLong,5)) + ',"tp":' + str.tostring(math.round(targetLong,5)) + ',"comment":"VCP BUY | RR ' + str.tostring(rrRatio) + 'R"}')
+
+alertcondition(enterShort,
+     title   = "VCP Short — Entrada",
+     message = '{"action":"sell","symbol":"EURUSD","risk":' + str.tostring(riskPct) + ',"sl":' + str.tostring(math.round(stopShort,5)) + ',"tp":' + str.tostring(math.round(targetShort,5)) + ',"comment":"VCP SELL | RR ' + str.tostring(rrRatio) + 'R"}')
+
+alertcondition(vcpActive and strategy.position_size == 0,
+     title   = "VCP Formando — Alerta antecipado",
+     message = '{"action":"alert","symbol":"EURUSD","comment":"VCP comprimindo — aguardar breakout"}')
