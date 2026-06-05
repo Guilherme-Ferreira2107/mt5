@@ -1,229 +1,285 @@
 //+------------------------------------------------------------------+
-//|                                                  My_First_EA.mq5 |
-//|                        Copyright 2010, MetaQuotes Software Corp. |
-//|                                              http://www.mql5.com |
+//|                                                  BREAK_CHANNELS   |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2010, MetaQuotes Software Corp."
-#property link "http://www.mql5.com"
+#property copyright "Guilherme Ferreira"
+#property link "guilhermeferreira2107@gmail.com"
 #property version "1.00"
-//--- input parameters
-int EA_Magic = 12345; // EA Magic Number
-input double Lot = 1; // Lots to Trade
 
-//--- Other parameters
-double p_close; // Variable to store the close value of a bar
-int zigzag_handle;
+int EA_Magic = 12345;
 
-input int InpDepth = 12;          // Depth do ZigZag
-input int InpDeviation = 5;       // Deviation do ZigZag
-input int InpBackstep = 3;        // Backstep do ZigZag
-input int MaxTopos = 3;           // Quantidade de topos visíveis
-input int MaxFundos = 3;          // Quantidade de fundos visíveis
-input int ArrowOffsetPoints = 50; // Distância visual da seta em pontos
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
-//+------------------------------------------------------------------+
+input double Lot = 1.0;           // Lotes
+input int InpDepth = 12;          // ZigZag Depth
+input int InpDeviation = 5;       // ZigZag Deviation
+input int InpBackstep = 3;        // ZigZag Backstep
+input int EMA_Periodo = 9;        // Periodo da EMA
+input int StopLossPoints = 300;   // Stop em pontos
+input int TakeProfitPoints = 600; // Alvo em pontos
+
+int zigzag_handle = INVALID_HANDLE;
+int ema_handle = INVALID_HANDLE;
+
+double ZigZag_Buffer[];
+double ZigZagHighBuffer[];
+double ZigZagLowBuffer[];
+double EmaBuffer[];
+
+bool FundosAscendentes = false;
+bool ToposDescendentes = false;
+double UltimoTopo = EMPTY_VALUE;
+double PenultimoTopo = EMPTY_VALUE;
+double UltimoFundo = EMPTY_VALUE;
+double PenultimoFundo = EMPTY_VALUE;
+
 int OnInit()
 {
-    zigzag_handle = iCustom(_Symbol, _Period, "zigzag", InpDepth, InpDeviation, InpBackstep);
-    //--- What if handle returns Invalid Handle
-    if (zigzag_handle < 0)
+    zigzag_handle = iCustom(_Symbol, _Period, "Examples\\ZigZag", InpDepth, InpDeviation, InpBackstep);
+    if (zigzag_handle == INVALID_HANDLE)
     {
-        Alert("Error Creating Handles for indicators - error: ", GetLastError(), "!!");
-        return (-1);
+        Alert("Erro ao criar handle do ZigZag: ", GetLastError());
+        return INIT_FAILED;
     }
 
-    return (0);
+    ema_handle = iMA(_Symbol, _Period, EMA_Periodo, 0, MODE_EMA, PRICE_CLOSE);
+    if (ema_handle == INVALID_HANDLE)
+    {
+        Alert("Erro ao criar handle da EMA: ", GetLastError());
+        return INIT_FAILED;
+    }
+
+    ArraySetAsSeries(ZigZag_Buffer, true);
+    ArraySetAsSeries(ZigZagHighBuffer, true);
+    ArraySetAsSeries(ZigZagLowBuffer, true);
+    ArraySetAsSeries(EmaBuffer, true);
+
+    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
-    IndicatorRelease(zigzag_handle);
+    if (ema_handle != INVALID_HANDLE)
+        IndicatorRelease(ema_handle);
+    if (zigzag_handle != INVALID_HANDLE)
+        IndicatorRelease(zigzag_handle);
+}
+
+bool IsNewBar()
+{
+    static datetime old_time = 0;
+    datetime new_time[1];
+
+    if (CopyTime(_Symbol, _Period, 0, 1, new_time) <= 0)
+        return false;
+
+    if (old_time != new_time[0])
+    {
+        old_time = new_time[0];
+        return true;
+    }
+
+    return false;
+}
+
+void UpdateConfirmedPivots(const double &high[], const double &low[], const int rates_total)
+{
+    int pivot_indices[];
+    double pivot_values[];
+    bool pivot_is_high[];
+    ArrayResize(pivot_indices, rates_total);
+    ArrayResize(pivot_values, rates_total);
+    ArrayResize(pivot_is_high, rates_total);
+
+    int pivot_count = 0;
+
+    for (int i = rates_total - 1; i >= 0; i--)
+    {
+        double zz = ZigZag_Buffer[i];
+        double zzHigh = ZigZagHighBuffer[i];
+        double zzLow = ZigZagLowBuffer[i];
+
+        if (zz == 0.0 || zz == EMPTY_VALUE)
+            continue;
+
+        bool is_high_pivot = (zzHigh != 0.0 && zzHigh != EMPTY_VALUE && MathAbs(zz - zzHigh) <= _Point * 2.0);
+        bool is_low_pivot = (zzLow != 0.0 && zzLow != EMPTY_VALUE && MathAbs(zz - zzLow) <= _Point * 2.0);
+
+        if (!is_high_pivot && !is_low_pivot)
+        {
+            if (MathAbs(zz - high[i]) <= _Point * 2.0)
+                is_high_pivot = true;
+            else if (MathAbs(zz - low[i]) <= _Point * 2.0)
+                is_low_pivot = true;
+        }
+
+        if (is_low_pivot)
+        {
+            pivot_indices[pivot_count] = i;
+            pivot_values[pivot_count] = zz;
+            pivot_is_high[pivot_count] = false;
+            pivot_count++;
+        }
+        else if (is_high_pivot)
+        {
+            pivot_indices[pivot_count] = i;
+            pivot_values[pivot_count] = zz;
+            pivot_is_high[pivot_count] = true;
+            pivot_count++;
+        }
+    }
+
+    UltimoTopo = EMPTY_VALUE;
+    PenultimoTopo = EMPTY_VALUE;
+    UltimoFundo = EMPTY_VALUE;
+    PenultimoFundo = EMPTY_VALUE;
+    FundosAscendentes = false;
+    ToposDescendentes = false;
+
+    if (pivot_count <= 1)
+        return;
+
+    int confirmed_high_count = 0;
+    int confirmed_low_count = 0;
+    double confirmed_high_values[];
+    double confirmed_low_values[];
+    ArrayResize(confirmed_high_values, pivot_count);
+    ArrayResize(confirmed_low_values, pivot_count);
+
+    for (int p = 0; p < pivot_count - 1; p++)
+    {
+        if (pivot_is_high[p])
+            confirmed_high_values[confirmed_high_count++] = pivot_values[p];
+        else
+            confirmed_low_values[confirmed_low_count++] = pivot_values[p];
+    }
+
+    if (confirmed_high_count >= 1)
+        UltimoTopo = confirmed_high_values[confirmed_high_count - 1];
+    if (confirmed_high_count >= 2)
+        PenultimoTopo = confirmed_high_values[confirmed_high_count - 2];
+
+    if (confirmed_low_count >= 1)
+        UltimoFundo = confirmed_low_values[confirmed_low_count - 1];
+    if (confirmed_low_count >= 2)
+        PenultimoFundo = confirmed_low_values[confirmed_low_count - 2];
+
+    FundosAscendentes = (UltimoFundo != EMPTY_VALUE && PenultimoFundo != EMPTY_VALUE && UltimoFundo > PenultimoFundo);
+    ToposDescendentes = (UltimoTopo != EMPTY_VALUE && PenultimoTopo != EMPTY_VALUE && UltimoTopo < PenultimoTopo);
 }
 
 void OnTick()
 {
-    //--- Do we have enough bars to work with
-    if (Bars(_Symbol, _Period) < 60) // if total bars is less than 60 bars
-    {
-        Alert("We have less than 60 bars, EA will now exit!!");
+    if (Bars(_Symbol, _Period) < 60)
         return;
-    }
 
-    // We will use the static Old_Time variable to serve the bar time.
-    // At each OnTick execution we will check the current bar time with the saved one.
-    // If the bar time isn't equal to the saved time, it indicates that we have a new tick.
-    static datetime Old_Time;
-    datetime New_Time[1];
-    bool IsNewBar = false;
-
-    // copying the last bar time to the element New_Time[0]
-    int copied = CopyTime(_Symbol, _Period, 0, 1, New_Time);
-    if (copied > 0) // ok, the data has been copied successfully
-    {
-        if (Old_Time != New_Time[0]) // if old time isn't equal to new bar time
-        {
-            IsNewBar = true; // if it isn't a first call, the new bar has appeared
-            if (MQL5InfoInteger(MQL5_DEBUGGING))
-                Print("We have new bar here ", New_Time[0], " old time was ", Old_Time);
-            Old_Time = New_Time[0]; // saving bar time
-        }
-    }
-    else
-    {
-        Alert("Error in copying historical times data, error =", GetLastError());
-        ResetLastError();
+    if (!IsNewBar())
         return;
-    }
 
-    //--- EA should only check for new trade if we have a new bar
-    if (IsNewBar == false)
-    {
-        return;
-    }
-
-    //--- Do we have enough bars to work with
-    int Mybars = Bars(_Symbol, _Period);
-    if (Mybars < 60) // if total bars is less than 60 bars
-    {
-        Alert("We have less than 60 bars, EA will now exit!!");
-        return;
-    }
-
-    //--- Define some MQL5 Structures we will use for our trade
-    MqlTick latest_price;     // To be used for getting recent/latest price quotes
-    MqlTradeRequest mrequest; // To be used for sending our trade requests
-    MqlTradeResult mresult;   // To be used to get our trade results
-    MqlRates mrate[];         // To be used to store the prices, volumes and spread of each bar
-    ZeroMemory(mrequest);     // Initialization of mrequest structure
-
-    double highMap[];
-    double lowMap[];
-
-    ArraySetAsSeries(highMap, true);
-    ArraySetAsSeries(lowMap, true);
-
-    // the rates arrays
-    ArraySetAsSeries(mrate, true);
-
-    int copiedHigh = CopyBuffer(zigzag_handle, 1, 0, 10, highMap);
-    int copiedLow = CopyBuffer(zigzag_handle, 2, 0, 10, lowMap);
-
-    //--- Get the last price quote using the MQL5 MqlTick Structure
+    MqlTick latest_price;
     if (!SymbolInfoTick(_Symbol, latest_price))
     {
-        Alert("Error getting the latest price quote - error:", GetLastError(), "!!");
+        Alert("Erro ao obter cotacao: ", GetLastError());
         return;
     }
 
-    //--- Get the details of the latest 3 bars
-    if (CopyRates(_Symbol, _Period, 0, 3, mrate) < 0)
+    MqlRates rates[];
+    ArraySetAsSeries(rates, true);
+    if (CopyRates(_Symbol, _Period, 0, 200, rates) <= 0)
     {
-        Alert("Error copying rates/history data - error:", GetLastError(), "!!");
-        ResetLastError();
+        Alert("Erro ao copiar rates: ", GetLastError());
         return;
     }
 
-    bool Buy_opened = false;  // variable to hold the result of Buy opened position
-    bool Sell_opened = false; // variables to hold the result of Sell opened position
+    int rates_total = ArraySize(rates);
+    if (rates_total < 10)
+        return;
 
-    if (PositionSelect(_Symbol) == true) // we have an opened position
+    double high[];
+    double low[];
+    double close[];
+    ArrayResize(high, rates_total);
+    ArrayResize(low, rates_total);
+    ArrayResize(close, rates_total);
+    ArraySetAsSeries(high, true);
+    ArraySetAsSeries(low, true);
+    ArraySetAsSeries(close, true);
+
+    for (int i = 0; i < rates_total; i++)
     {
-        if (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-        {
-            Buy_opened = true; // It is a Buy
-        }
-        else if (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_SELL)
-        {
-            Sell_opened = true; // It is a Sell
-        }
+        high[i] = rates[i].high;
+        low[i] = rates[i].low;
+        close[i] = rates[i].close;
     }
 
-    // Copy the bar close price for the previous bar prior to the current bar, that is Bar 1
-    p_close = mrate[1].close; // bar 1 close price
+    if (CopyBuffer(zigzag_handle, 0, 0, rates_total, ZigZag_Buffer) <= 0)
+        return;
+    if (CopyBuffer(zigzag_handle, 1, 0, rates_total, ZigZagHighBuffer) <= 0)
+        return;
+    if (CopyBuffer(zigzag_handle, 2, 0, rates_total, ZigZagLowBuffer) <= 0)
+        return;
+    if (CopyBuffer(ema_handle, 0, 0, rates_total, EmaBuffer) <= 0)
+        return;
 
-    //--- Declare bool type variables to hold our Buy Conditions
-    double min_anterior = iLow(_Symbol, _Period, 0);
+    UpdateConfirmedPivots(high, low, rates_total);
 
-    bool Buy_Condition_1 = (min_anterior <= inferior[0]);
+    bool sinal_venda = false;
+    bool sinal_compra = false;
 
-    //--- Putting all together
-    if (Buy_Condition_1)
+    if (rates_total > 3)
     {
-        // any opened Buy position?
-        if (Buy_opened)
-        {
-            Alert("We already have a Buy Position!!!");
-            return; // Don't open a new Buy Position
-        }
-        ZeroMemory(mrequest);
-        mrequest.action = TRADE_ACTION_DEAL;                                     // immediate order execution
-        mrequest.price = NormalizeDouble(latest_price.ask, _Digits);             // latest ask price
-        mrequest.sl = NormalizeDouble(latest_price.ask - STP * _Point, _Digits); // Stop Loss
-        mrequest.tp = NormalizeDouble(latest_price.ask + TKP * _Point, _Digits); // Take Profit
-        mrequest.symbol = _Symbol;                                               // currency pair
-        mrequest.volume = Lot;                                                   // number of lots to trade
-        mrequest.magic = EA_Magic;                                               // Order Magic Number
-        mrequest.type = ORDER_TYPE_BUY;                                          // Buy Order
-        mrequest.type_filling = ORDER_FILLING_IOC;                               // Order execution type
-        mrequest.deviation = 100;                                                // Deviation from current price
-        //--- send order
-        OrderSend(mrequest, mresult);
-        // get the result code
-        if (mresult.retcode == 10009 || mresult.retcode == 10008) // Request is completed or order placed
-        {
-            Alert("A Buy order has been successfully placed with Ticket#:", mresult.order, "!!");
-        }
-        else
-        {
-            Alert("The Buy order request could not be completed -error:", GetLastError());
-            ResetLastError();
-            return;
-        }
+        sinal_venda = (ToposDescendentes &&
+                       close[2] > EmaBuffer[2] &&
+                       close[1] < EmaBuffer[1]);
+
+        sinal_compra = (FundosAscendentes &&
+                        close[3] < EmaBuffer[3] &&
+                        close[2] > EmaBuffer[2]);
     }
-    /*
-        2. Check for a Short/Sell Setup : MA-8 decreasing downwards,
-        previous price close below it, ADX > 22, -DI > +DI
-    */
-    //--- Declare bool type variables to hold our Sell Conditions
-    double max_anterior = iHigh(_Symbol, _Period, 0);
 
-    bool Sell_Condition_1 = (max_anterior >= superior[0]);
-
-    //--- Putting all together
-    if (Sell_Condition_1)
+    bool buy_opened = false;
+    bool sell_opened = false;
+    if (PositionSelect(_Symbol))
     {
-        // any opened Sell position?
-        if (Sell_opened)
-        {
-            Alert("We already have a Sell position!!!");
-            return; // Don't open a new Sell Position
-        }
-        ZeroMemory(mrequest);
-        mrequest.action = TRADE_ACTION_DEAL;                                     // immediate order execution
-        mrequest.price = NormalizeDouble(latest_price.bid, _Digits);             // latest Bid price
-        mrequest.sl = NormalizeDouble(latest_price.bid + STP * _Point, _Digits); // Stop Loss
-        mrequest.tp = NormalizeDouble(latest_price.bid - TKP * _Point, _Digits); // Take Profit
-        mrequest.symbol = _Symbol;                                               // currency pair
-        mrequest.volume = Lot;                                                   // number of lots to trade
-        mrequest.magic = EA_Magic;                                               // Order Magic Number
-        mrequest.type = ORDER_TYPE_SELL;                                         // Sell Order
-        mrequest.type_filling = ORDER_FILLING_IOC;                               // Order execution type
-        mrequest.deviation = 100;                                                // Deviation from current price
-        //--- send order
-        OrderSend(mrequest, mresult);
-        // get the result code
-        if (mresult.retcode == 10009 || mresult.retcode == 10008) // Request is completed or order placed
-        {
-            Alert("A Sell order has been successfully placed with Ticket#:", mresult.order, "!!");
-        }
-        else
-        {
-            Alert("The Sell order request could not be completed -error:", GetLastError());
-            ResetLastError();
-            return;
-        }
+        long position_type = PositionGetInteger(POSITION_TYPE);
+        buy_opened = (position_type == POSITION_TYPE_BUY);
+        sell_opened = (position_type == POSITION_TYPE_SELL);
     }
-    return;
+
+    MqlTradeRequest request;
+    MqlTradeResult result;
+    ZeroMemory(request);
+    ZeroMemory(result);
+
+    if (sinal_compra && !buy_opened && !sell_opened)
+    {
+        request.action = TRADE_ACTION_DEAL;
+        request.symbol = _Symbol;
+        request.volume = Lot;
+        request.magic = EA_Magic;
+        request.type = ORDER_TYPE_BUY;
+        request.price = NormalizeDouble(latest_price.ask, _Digits);
+        request.sl = NormalizeDouble(latest_price.ask - StopLossPoints * _Point, _Digits);
+        request.tp = NormalizeDouble(latest_price.ask + TakeProfitPoints * _Point, _Digits);
+        request.deviation = 100;
+        request.type_filling = ORDER_FILLING_IOC;
+
+        OrderSend(request, result);
+    }
+
+    if (sinal_venda && !sell_opened && !buy_opened)
+    {
+        ZeroMemory(request);
+        ZeroMemory(result);
+        request.action = TRADE_ACTION_DEAL;
+        request.symbol = _Symbol;
+        request.volume = Lot;
+        request.magic = EA_Magic;
+        request.type = ORDER_TYPE_SELL;
+        request.price = NormalizeDouble(latest_price.bid, _Digits);
+        request.sl = NormalizeDouble(latest_price.bid + StopLossPoints * _Point, _Digits);
+        request.tp = NormalizeDouble(latest_price.bid - TakeProfitPoints * _Point, _Digits);
+        request.deviation = 100;
+        request.type_filling = ORDER_FILLING_IOC;
+
+        OrderSend(request, result);
+    }
 }
 //+------------------------------------------------------------------+
