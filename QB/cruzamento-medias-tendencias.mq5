@@ -15,8 +15,8 @@ input string HoraTermino = "23:59";    // Horário de Término
 input group "Configurações gerais"
 
     input bool GestaoAutomatica = false; // Gestão manual?
-input int StopLoss = 25;                 // Stop Loss
-input int TakeProfit = 50;               // Take Profit
+input double StopLoss = 25.0;            // Stop Loss
+input double TakeProfit = 50.0;          // Take Profit
 input double TamanhoLote = 0.1;          // Volume base (Lotes)
 input double DistanciaAlvo = 1.5;        // Multiplicador de distância (risco/retorno)
 
@@ -28,6 +28,7 @@ input bool HabilitarSinaisADX = true;             // Ordens ADX
 input bool HabilitarSinaisApenasTendencia = true; // Apenas a Favor da Tendencia
 input bool ApenasLong = false;                    // Apenas compras
 input bool ApenasShort = false;                   // Apenas vendas
+input bool GatilhoCrescendoADX = false;
 
 input group "Configurações de Martingale"
 
@@ -40,20 +41,22 @@ double desvioBandas = 3.9;
 int deslocamentoBandas = 0;
 ENUM_APPLIED_PRICE precoBandas = PRICE_CLOSE;
 
-input int periodoRsi = 3;         // RSI Período
-input int rsiSobrecomprado = 94;  // RSI Sobre comprado
-input int rsiSobrevendido = 6;    // RSI Sobre vendido
-input int rsiAltoTendencia = 90;  // RSI Sobre comprado (Tendencia)
-input int rsiBaixoTendencia = 10; // RSI Sobre vendido (Tendencia)
-
-input int periodoMediaMovel = 10; // Período MME
+input int periodoRsi = 2;             // RSI Período
+input int rsiSobrecomprado = 95;      // RSI Sobre comprado
+input int rsiSobrevendido = 5;        // RSI Sobre vendido
+input int rsiAltoTendencia = 90;      // RSI Sobre comprado (Tendencia)
+input int rsiBaixoTendencia = 10;     // RSI Sobre vendido (Tendencia)
+input int periodoMediaCurta = 10;     // Período da média aritmética principal
+input int periodoMediaDeslocada = 10; // Período da média aritmética deslocada
+input int deslocamentoMedia = 1;      // Deslocamento da segunda média
+input int periodoMediaTendencia = 55;
 
 int adxPeriodo = 20;
 int adxNivel = 20;
 
-int pontosStop, pontosGain;
-int handleBandas, handleRsi, handleAdx, handleMME10;
-double bandaSuperior[], bandaInferior[], bufferRsi[], bufferAdx[], bufferMME10[];
+double pontosStop, pontosGain;
+int handleBandas, handleRsi, handleAdx, handleMediaCurta, handleMediaDeslocada, handleMediaTendencia;
+double bandaSuperior[], bandaInferior[], bufferRsi[], bufferAdx[], bufferMediaCurta[], bufferMediaDeslocada[], bufferMediaTendencia[];
 
 int nivelMartingale = 0;
 ulong ultimoTicketProcessado = 0;
@@ -107,9 +110,11 @@ int OnInit()
     handleBandas = iBands(_Symbol, _Period, periodoBandas, deslocamentoBandas, desvioBandas, precoBandas);
     handleRsi = iRSI(_Symbol, _Period, periodoRsi, PRICE_CLOSE);
     handleAdx = iADX(_Symbol, _Period, adxPeriodo);
-    handleMME10 = iMA(_Symbol, _Period, periodoMediaMovel, 0, MODE_EMA, PRICE_CLOSE);
+    handleMediaCurta = iMA(_Symbol, _Period, periodoMediaCurta, 0, MODE_SMA, PRICE_CLOSE);
+    handleMediaDeslocada = iMA(_Symbol, _Period, periodoMediaDeslocada, deslocamentoMedia, MODE_SMA, PRICE_CLOSE);
+    handleMediaTendencia = iMA(_Symbol, _Period, periodoMediaTendencia, 0, MODE_EMA, PRICE_CLOSE);
 
-    if (handleBandas < 0 || handleRsi < 0 || handleAdx < 0 || handleMME10 < 0)
+    if (handleBandas < 0 || handleRsi < 0 || handleAdx < 0 || handleMediaCurta < 0 || handleMediaDeslocada < 0 || handleMediaTendencia < 0)
     {
         Alert("Erro ao criar handles dos indicadores: ", GetLastError());
         return INIT_FAILED;
@@ -179,7 +184,9 @@ void OnDeinit(const int reason)
     IndicatorRelease(handleBandas);
     IndicatorRelease(handleRsi);
     IndicatorRelease(handleAdx);
-    IndicatorRelease(handleMME10);
+    IndicatorRelease(handleMediaCurta);
+    IndicatorRelease(handleMediaDeslocada);
+    IndicatorRelease(handleMediaTendencia);
 }
 
 //+------------------------------------------------------------------+
@@ -241,7 +248,9 @@ void OnTick()
     ArraySetAsSeries(bandaInferior, true);
     ArraySetAsSeries(bufferRsi, true);
     ArraySetAsSeries(bufferAdx, true);
-    ArraySetAsSeries(bufferMME10, true);
+    ArraySetAsSeries(bufferMediaCurta, true);
+    ArraySetAsSeries(bufferMediaDeslocada, true);
+    ArraySetAsSeries(bufferMediaTendencia, true);
 
     if (!SymbolInfoTick(_Symbol, latest_price))
     {
@@ -249,7 +258,7 @@ void OnTick()
         return;
     }
 
-    if (CopyRates(_Symbol, _Period, 0, 4, barras) < 0)
+    if (CopyRates(_Symbol, _Period, 0, 12, barras) < 0)
     {
         Alert("Erro ao copiar barras: ", GetLastError());
         ResetLastError();
@@ -268,15 +277,27 @@ void OnTick()
         ResetLastError();
         return;
     }
-    if (CopyBuffer(handleAdx, 0, 0, 4, bufferAdx) < 0)
+    if (CopyBuffer(handleAdx, 0, 0, 6, bufferAdx) < 6)
     {
         Alert("Erro ao copiar buffer do ADX: ", GetLastError());
         ResetLastError();
         return;
     }
-    if (CopyBuffer(handleMME10, 0, 0, 4, bufferMME10) < 0)
+    if (CopyBuffer(handleMediaCurta, 0, 0, 3, bufferMediaCurta) < 3)
     {
-        Alert("Erro ao copiar buffer do MME10: ", GetLastError());
+        Alert("Erro ao copiar buffer da media curta: ", GetLastError());
+        ResetLastError();
+        return;
+    }
+    if (CopyBuffer(handleMediaDeslocada, 0, 0, 3, bufferMediaDeslocada) < 3)
+    {
+        Alert("Erro ao copiar buffer da media deslocada: ", GetLastError());
+        ResetLastError();
+        return;
+    }
+    if (CopyBuffer(handleMediaTendencia, 0, 0, 3, bufferMediaTendencia) < 3)
+    {
+        Alert("Erro ao copiar buffer da media tendencia: ", GetLastError());
         ResetLastError();
         return;
     }
@@ -292,49 +313,54 @@ void OnTick()
             temVendaAberta = true;
     }
 
-    bool adxCrescendo = (bufferAdx[1] > bufferAdx[2] && bufferAdx[2] > bufferAdx[3]);
+    bool cruzouParaCima = (bufferMediaCurta[1] > bufferMediaDeslocada[1] &&
+                           bufferMediaCurta[2] <= bufferMediaDeslocada[2]);
+    bool cruzouParaBaixo = (bufferMediaCurta[1] < bufferMediaDeslocada[1] &&
+                            bufferMediaCurta[2] >= bufferMediaDeslocada[2]);
+
+    if (temCompraAberta && cruzouParaBaixo)
+    {
+        ZeroMemory(requisicao);
+
+        double volumePosicao = PositionGetDouble(POSITION_VOLUME);
+
+        requisicao.action = TRADE_ACTION_DEAL;
+        requisicao.position = PositionGetInteger(POSITION_TICKET);
+        requisicao.symbol = _Symbol;
+        requisicao.volume = volumePosicao;
+        requisicao.magic = numeroMagico;
+        requisicao.type = ORDER_TYPE_SELL;
+        requisicao.price = NormalizeDouble(latest_price.bid, _Digits);
+        requisicao.type_filling = ORDER_FILLING_FOK;
+        requisicao.deviation = 100;
+
+        if (!OrderSend(requisicao, resultado))
+        {
+            Alert("Erro ao encerrar ordem de compra: ", GetLastError());
+            ResetLastError();
+            return;
+        }
+
+        if (resultado.retcode == 10009 || resultado.retcode == 10008)
+            Alert("Ordem de compra encerrada! Ticket#: ", resultado.order);
+
+        return;
+    }
+
+    bool adxCrescendo = (bufferAdx[1] > bufferAdx[2] &&
+                         bufferAdx[2] > bufferAdx[3] &&
+                         bufferAdx[3] > bufferAdx[4] &&
+                         bufferAdx[4] > bufferAdx[5]);
 
     // ADX >= adxNivel indica mercado em tendência; abaixo disso, mercado lateral
     bool emTendencia = (bufferAdx[0] >= adxNivel) && adxCrescendo;
 
-    // --- GATILHOS DE COMPRA ---
+    bool precoAcimaTendenciaAlta = (bufferMediaCurta[0] > bufferMediaTendencia[0]) && (bufferMediaDeslocada[0] > bufferMediaTendencia[0]);
 
-    // [CONTRA TENDÊNCIA] Seta Roxa — Preço toca/rompe a banda inferior de Bollinger:
-    // a mínima da barra anterior encostou ou ultrapassou a banda inferior,
-    // indicando possível exaustão de venda e reversão para cima.
-    double minimaAnterior = iLow(_Symbol, _Period, 1);
-    bool condCompra1 = (!HabilitarSinaisApenasTendencia && HabilitarSinaisLentos && minimaAnterior <= bandaInferior[1]);
+    bool condCompra1 = (!temCompraAberta && !temVendaAberta && cruzouParaCima) && precoAcimaTendenciaAlta;
 
-    // [CONTRA TENDÊNCIA] Seta Azul — RSI entra em sobrevendido em mercado lateral:
-    // sem tendência (ADX < adxNivel), o RSI acabou de cruzar para baixo do nível mínimo,
-    // sinalizando que o preço pode estar num extremo de queda e pronto para reverter.
-    bool condCompra2 = (!HabilitarSinaisApenasTendencia && HabilitarSinaisRapidos && !condCompra1 && !emTendencia && bufferRsi[1] <= rsiSobrevendido && bufferRsi[2] >= rsiSobrevendido);
-
-    // [A FAVOR DA TENDÊNCIA] Seta Azul — RSI rompe nível alto em mercado tendencial:
-    // com tendência de alta (ADX >= adxNivel), o RSI cruzou acima do nível alto,
-    // confirmando momentum e entrada na direção da tendência.
-    bool condCompra3 = (HabilitarSinaisApenasTendencia && HabilitarSinaisRapidos && emTendencia && bufferRsi[1] >= rsiAltoTendencia && bufferRsi[2] <= rsiAltoTendencia);
-
-    // [A FAVOR DA TENDÊNCIA] 3 candles de alta consecutivos com ADX crescente:
-    // as 3 últimas barras fechadas são de alta (close > open) e o ADX está em
-    // crescimento consistente nas mesmas 3 barras, confirmando força na tendência.
-    bool tresCandesAlta = (barras[1].close > barras[1].open &&
-                           barras[2].close > barras[2].open &&
-                           barras[3].close > barras[3].open);
-
-    bool doisCandesAlta = (barras[1].close > barras[1].open && barras[2].close > barras[2].open);
-
-    bool condCompra4 = (HabilitarSinaisApenasTendencia && HabilitarSinaisADX && tresCandesAlta && adxCrescendo);
-
-    bool condCompra5 = (doisCandesAlta && barras[0].close > bufferMME10[0]) && (emTendencia && adxCrescendo);
-
-    if (condCompra1 || condCompra2 || condCompra3 || condCompra4 || condCompra5)
+    if (condCompra1)
     {
-        if (temCompraAberta || temVendaAberta)
-        {
-            Alert("Já existe uma posição aberta!");
-            return;
-        }
         if (ApenasShort)
         {
             Alert("Apenas posições de venda são permitidas!");
@@ -343,10 +369,22 @@ void OnTick()
 
         ZeroMemory(requisicao);
 
+        double somaTamanhos = 0;
+
+        for (int i = 1; i <= 10; i++)
+        {
+            double maxima = iHigh(_Symbol, _Period, i);
+            double minima = iLow(_Symbol, _Period, i);
+            somaTamanhos += (maxima - minima);
+        }
+
+        double alturaMediana = somaTamanhos / 10.0;
+
         double min0 = iLow(_Symbol, _Period, 0);
         double min1 = iLow(_Symbol, _Period, 1);
         double min2 = iLow(_Symbol, _Period, 2);
-        double sl = MathMin(min0, MathMin(min1, min2));
+        double sl = alturaMediana * 2.0;
+        // double sl = MathMin(min0, MathMin(min1, min2));
         double dist = latest_price.ask - sl;
         double tp = latest_price.ask + (dist * DistanciaAlvo);
 
@@ -355,8 +393,8 @@ void OnTick()
 
         requisicao.action = TRADE_ACTION_DEAL;
         requisicao.price = NormalizeDouble(latest_price.ask, _Digits);
-        requisicao.tp = GestaoAutomatica ? tpManual : NormalizeDouble(tp, _Digits);
-        requisicao.sl = GestaoAutomatica ? slManual : NormalizeDouble(sl, _Digits);
+        // requisicao.tp = GestaoAutomatica ? tpManual : NormalizeDouble(tp, _Digits);
+        // requisicao.sl = GestaoAutomatica ? slManual : NormalizeDouble(sl, _Digits);
         requisicao.symbol = _Symbol;
         requisicao.volume = loteAtual;
         requisicao.magic = numeroMagico;
@@ -371,72 +409,6 @@ void OnTick()
         }
         if (resultado.retcode == 10009 || resultado.retcode == 10008)
             Alert("Ordem de compra enviada! Ticket#: ", resultado.order, " | Lote: ", loteAtual);
-    }
-
-    // --- GATILHOS DE VENDA ---
-
-    // [CONTRA TENDÊNCIA] Seta Roxa — Preço toca/rompe a banda superior de Bollinger:
-    // a máxima da barra anterior encostou ou ultrapassou a banda superior,
-    // indicando possível exaustão de compra e reversão para baixo.
-    double maximaAnterior = iHigh(_Symbol, _Period, 1);
-    bool condVenda1 = (!HabilitarSinaisApenasTendencia && HabilitarSinaisLentos && maximaAnterior >= bandaSuperior[1]);
-
-    // [CONTRA TENDÊNCIA] Seta Azul — RSI entra em sobrecomprado em mercado lateral:
-    // sem tendência (ADX < adxNivel), o RSI acabou de cruzar para cima do nível máximo,
-    // sinalizando que o preço pode estar num extremo de alta e pronto para reverter.
-    bool condVenda2 = (!HabilitarSinaisApenasTendencia && HabilitarSinaisRapidos && !condVenda1 && !emTendencia && bufferRsi[1] >= rsiSobrecomprado && bufferRsi[2] <= rsiSobrecomprado);
-
-    // [A FAVOR DA TENDÊNCIA] Seta Azul — RSI rompe nível baixo em mercado tendencial:
-    // com tendência de baixa (ADX >= adxNivel), o RSI cruzou abaixo do nível baixo,
-    // confirmando momentum e entrada na direção da tendência.
-    bool condVenda3 = (HabilitarSinaisApenasTendencia && HabilitarSinaisRapidos && !condVenda1 && emTendencia && bufferRsi[1] <= rsiBaixoTendencia && bufferRsi[2] >= rsiBaixoTendencia);
-
-    // [A FAVOR DA TENDÊNCIA] 3 candles de baixa consecutivos com ADX crescente:
-    // as 3 últimas barras fechadas são de baixa (close < open) e o ADX está em
-    // crescimento consistente nas mesmas 3 barras, confirmando força na tendência.
-    bool tresCandlesBaixa = (barras[1].close < barras[1].open &&
-                             barras[2].close < barras[2].open &&
-                             barras[3].close < barras[3].open);
-    bool condVenda4 = (HabilitarSinaisApenasTendencia && HabilitarSinaisADX && tresCandlesBaixa && adxCrescendo);
-
-    if (condVenda1 || condVenda2 || condVenda3 || condVenda4)
-    {
-        if (temVendaAberta || temCompraAberta)
-        {
-            Alert("Já existe uma posição aberta!");
-            return;
-        }
-        if (ApenasLong)
-        {
-            Alert("Apenas posições de compra são permitidas!");
-            return;
-        }
-        ZeroMemory(requisicao);
-        double max0 = iHigh(_Symbol, _Period, 0);
-        double max1 = iHigh(_Symbol, _Period, 1);
-        double max2 = iHigh(_Symbol, _Period, 2);
-        double sl = MathMax(max0, MathMax(max1, max2));
-        double dist = sl - latest_price.bid;
-        double tp = latest_price.bid - (dist * DistanciaAlvo);
-
-        requisicao.action = TRADE_ACTION_DEAL;
-        requisicao.price = NormalizeDouble(latest_price.bid, _Digits);
-        requisicao.sl = NormalizeDouble(sl, _Digits);
-        requisicao.tp = NormalizeDouble(tp, _Digits);
-        requisicao.symbol = _Symbol;
-        requisicao.volume = loteAtual;
-        requisicao.magic = numeroMagico;
-        requisicao.type = ORDER_TYPE_SELL;
-        requisicao.type_filling = ORDER_FILLING_FOK;
-        requisicao.deviation = 100;
-        if (!OrderSend(requisicao, resultado))
-        {
-            Alert("Erro ao enviar ordem de venda: ", GetLastError());
-            ResetLastError();
-            return;
-        }
-        if (resultado.retcode == 10009 || resultado.retcode == 10008)
-            Alert("Ordem de venda enviada! Ticket#: ", resultado.order, " | Lote: ", loteAtual);
     }
 }
 //+------------------------------------------------------------------+
