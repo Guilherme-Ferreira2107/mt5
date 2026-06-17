@@ -57,6 +57,7 @@ int adxNivel = 20;
 double pontosStop, pontosGain;
 int handleBandas, handleRsi, handleAdx, handleMediaCurta, handleMediaDeslocada, handleMediaTendencia;
 double bandaSuperior[], bandaInferior[], bufferRsi[], bufferAdx[], bufferMediaCurta[], bufferMediaDeslocada[], bufferMediaTendencia[];
+double bufferMediaDeslocadaCalculo[];
 
 int nivelMartingale = 0;
 ulong ultimoTicketProcessado = 0;
@@ -111,7 +112,7 @@ int OnInit()
     handleRsi = iRSI(_Symbol, _Period, periodoRsi, PRICE_CLOSE);
     handleAdx = iADX(_Symbol, _Period, adxPeriodo);
     handleMediaCurta = iMA(_Symbol, _Period, periodoMediaCurta, 0, MODE_SMA, PRICE_CLOSE);
-    handleMediaDeslocada = iMA(_Symbol, _Period, periodoMediaDeslocada, deslocamentoMedia, MODE_SMA, PRICE_CLOSE);
+    handleMediaDeslocada = iMA(_Symbol, _Period, periodoMediaDeslocada, 0, MODE_SMA, PRICE_CLOSE);
     handleMediaTendencia = iMA(_Symbol, _Period, periodoMediaTendencia, 0, MODE_EMA, PRICE_CLOSE);
 
     if (handleBandas < 0 || handleRsi < 0 || handleAdx < 0 || handleMediaCurta < 0 || handleMediaDeslocada < 0 || handleMediaTendencia < 0)
@@ -250,6 +251,7 @@ void OnTick()
     ArraySetAsSeries(bufferAdx, true);
     ArraySetAsSeries(bufferMediaCurta, true);
     ArraySetAsSeries(bufferMediaDeslocada, true);
+    ArraySetAsSeries(bufferMediaDeslocadaCalculo, true);
     ArraySetAsSeries(bufferMediaTendencia, true);
 
     if (!SymbolInfoTick(_Symbol, latest_price))
@@ -289,7 +291,7 @@ void OnTick()
         ResetLastError();
         return;
     }
-    if (CopyBuffer(handleMediaDeslocada, 0, 0, 3, bufferMediaDeslocada) < 3)
+    if (CopyBuffer(handleMediaDeslocada, 0, 0, 3 + deslocamentoMedia, bufferMediaDeslocadaCalculo) < 3 + deslocamentoMedia)
     {
         Alert("Erro ao copiar buffer da media deslocada: ", GetLastError());
         ResetLastError();
@@ -313,10 +315,10 @@ void OnTick()
             temVendaAberta = true;
     }
 
-    bool cruzouParaCima = (bufferMediaCurta[1] > bufferMediaDeslocada[1] &&
-                           bufferMediaCurta[2] <= bufferMediaDeslocada[2]);
-    bool cruzouParaBaixo = (bufferMediaCurta[1] < bufferMediaDeslocada[1] &&
-                            bufferMediaCurta[2] >= bufferMediaDeslocada[2]);
+    bool cruzouParaCima = (bufferMediaCurta[1] > bufferMediaDeslocadaCalculo[1 + deslocamentoMedia] &&
+                           bufferMediaCurta[2] <= bufferMediaDeslocadaCalculo[2 + deslocamentoMedia]);
+    bool cruzouParaBaixo = (bufferMediaCurta[1] < bufferMediaDeslocadaCalculo[1 + deslocamentoMedia] &&
+                            bufferMediaCurta[2] >= bufferMediaDeslocadaCalculo[2 + deslocamentoMedia]);
 
     if (temCompraAberta && cruzouParaBaixo)
     {
@@ -355,7 +357,8 @@ void OnTick()
     // ADX >= adxNivel indica mercado em tendência; abaixo disso, mercado lateral
     bool emTendencia = (bufferAdx[0] >= adxNivel) && adxCrescendo;
 
-    bool precoAcimaTendenciaAlta = (bufferMediaCurta[0] > bufferMediaTendencia[0]) && (bufferMediaDeslocada[0] > bufferMediaTendencia[0]);
+    bool precoAcimaTendenciaAlta = (bufferMediaCurta[0] > bufferMediaTendencia[0]) &&
+                                   (bufferMediaDeslocadaCalculo[deslocamentoMedia] > bufferMediaTendencia[0]);
 
     bool condCompra1 = (!temCompraAberta && !temVendaAberta && cruzouParaCima) && precoAcimaTendenciaAlta;
 
@@ -380,21 +383,17 @@ void OnTick()
 
         double alturaMediana = somaTamanhos / 10.0;
 
-        double min0 = iLow(_Symbol, _Period, 0);
-        double min1 = iLow(_Symbol, _Period, 1);
-        double min2 = iLow(_Symbol, _Period, 2);
-        double sl = alturaMediana * 2.0;
-        // double sl = MathMin(min0, MathMin(min1, min2));
-        double dist = latest_price.ask - sl;
-        double tp = latest_price.ask + (dist * DistanciaAlvo);
+        double distanciaStop = alturaMediana * 2.0;
+        double sl = NormalizeDouble(latest_price.ask - distanciaStop, _Digits);
+        double tp = NormalizeDouble(latest_price.ask + (distanciaStop * DistanciaAlvo), _Digits);
 
         double slManual = NormalizeDouble(latest_price.ask - pontosStop * _Point, _Digits);
         double tpManual = NormalizeDouble(latest_price.ask + pontosGain * _Point, _Digits);
 
         requisicao.action = TRADE_ACTION_DEAL;
         requisicao.price = NormalizeDouble(latest_price.ask, _Digits);
-        // requisicao.tp = GestaoAutomatica ? tpManual : NormalizeDouble(tp, _Digits);
-        // requisicao.sl = GestaoAutomatica ? slManual : NormalizeDouble(sl, _Digits);
+        requisicao.tp = GestaoAutomatica ? tpManual : tp;
+        requisicao.sl = GestaoAutomatica ? slManual : sl;
         requisicao.symbol = _Symbol;
         requisicao.volume = loteAtual;
         requisicao.magic = numeroMagico;
