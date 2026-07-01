@@ -13,6 +13,7 @@ input double Lot = 1; // Lots to Trade
 double p_close; // Variable to store the close value of a bar
 int zigzag_handle;
 int rsi_handle;
+int adx_handle;
 
 input int InpDepth = 12;               // Depth do ZigZag
 input int InpDeviation = 5;            // Deviation do ZigZag
@@ -23,6 +24,8 @@ input int ArrowOffsetPoints = 50;      // Distancia visual da seta em pontos
 input int RSI_Period = 2;              // Periodo do RSI
 input int RSI_Buy_Level = 10;          // Nivel do RSI para compra
 input int RSI_Sell_Level = 90;         // Nivel do RSI para venda
+input int ADX_Period = 14;             // Periodo do ADX
+input double ADX_Min_Level = 30.0;     // Nao operar quando ADX estiver abaixo deste nivel
 input int StopLookbackBars = 3;        // Barras para calcular o stop estrutural
 input double RiskRewardRatio = 2.0;    // Multiplicador do alvo sobre o risco
 input int SlippagePoints = 100;        // Desvio maximo
@@ -276,8 +279,9 @@ int OnInit()
 {
     zigzag_handle = iCustom(_Symbol, _Period, "Examples\\ZigZag", InpDepth, InpDeviation, InpBackstep);
     rsi_handle = iRSI(_Symbol, _Period, RSI_Period, PRICE_CLOSE);
+    adx_handle = iADX(_Symbol, _Period, ADX_Period);
 
-    if (zigzag_handle < 0 || rsi_handle < 0)
+    if (zigzag_handle < 0 || rsi_handle < 0 || adx_handle < 0)
     {
         Alert("Error Creating Handles for indicators - error: ", GetLastError(), "!!");
         return (-1);
@@ -305,6 +309,7 @@ void OnDeinit(const int reason)
 {
     IndicatorRelease(zigzag_handle);
     IndicatorRelease(rsi_handle);
+    IndicatorRelease(adx_handle);
 }
 
 void OnTick()
@@ -348,15 +353,25 @@ void OnTick()
     MqlTradeResult mresult;
     MqlRates mrate[];
     double rsi_buffer[];
+    double adx_buffer[];
     ZeroMemory(mrequest);
 
     ArraySetAsSeries(mrate, true);
     ArraySetAsSeries(rsi_buffer, true);
+    ArraySetAsSeries(adx_buffer, true);
 
     int copiedRsi = CopyBuffer(rsi_handle, 0, 0, 3, rsi_buffer);
     if (copiedRsi < 3)
     {
         Alert("Error copying RSI buffer - error:", GetLastError(), "!!");
+        ResetLastError();
+        return;
+    }
+
+    int copiedAdx = CopyBuffer(adx_handle, 0, 0, 2, adx_buffer);
+    if (copiedAdx < 2)
+    {
+        Alert("Error copying ADX buffer - error:", GetLastError(), "!!");
         ResetLastError();
         return;
     }
@@ -430,10 +445,11 @@ void OnTick()
     bool descending_highs = GetConfirmedDescendingHighs(last_confirmed_high, previous_confirmed_high);
     bool rsi_buy_trigger = (rsi_buffer[2] <= RSI_Buy_Level && rsi_buffer[1] > RSI_Buy_Level);
     bool rsi_sell_trigger = (rsi_buffer[2] >= RSI_Sell_Level && rsi_buffer[1] < RSI_Sell_Level);
+    bool adx_allows_entry = (adx_buffer[1] >= ADX_Min_Level);
     bool price_above_last_confirmed_low = (last_confirmed_low != EMPTY_VALUE && trigger_candle_close > last_confirmed_low);
     bool price_below_last_confirmed_high = (last_confirmed_high != EMPTY_VALUE && trigger_candle_close < last_confirmed_high);
-    bool buy_condition = ascending_lows && rsi_buy_trigger && price_above_last_confirmed_low;
-    bool sell_condition = descending_highs && rsi_sell_trigger && price_below_last_confirmed_high;
+    bool buy_condition = ascending_lows && rsi_buy_trigger && adx_allows_entry && price_above_last_confirmed_low;
+    bool sell_condition = descending_highs && rsi_sell_trigger && adx_allows_entry && price_below_last_confirmed_high;
 
     int stop_bars = MathMax(1, StopLookbackBars);
     double highest_recent_high = mrate[1].high;
