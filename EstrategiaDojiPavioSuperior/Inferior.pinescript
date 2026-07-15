@@ -1,0 +1,49 @@
+//@version=6
+strategy("Estrategia Doji - Pavio Superior/Inferior", overlay=true, initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1)
+
+// ================== INPUTS ==================
+dojiBodyPercent  = input.float(20.0, "Corpo maximo do Doji (% do range total)", minval=0.1, maxval=50.0, step=0.5) / 100
+targetMultiplier = input.float(10.0, "Multiplicador do Alvo (x altura do Doji)", minval=0.1, step=0.5, tooltip="Altere para 2, 3, 4... para testar diferentes alvos")
+usarStopAlvoFixo = input.bool(false, "Usar Stop Loss e Alvo fixos")
+stopFixoPontos   = input.float(20.0, "Stop Loss fixo (pontos)", minval=1.0, step=5.0)
+alvoFixoPontos   = input.float(100.0, "Alvo fixo (pontos)", minval=1.0, step=5.0)
+
+// strategy.exit recebe loss/profit em ticks, por isso convertemos os pontos.
+stopFixoTicks = stopFixoPontos / syminfo.mintick
+alvoFixoTicks = alvoFixoPontos / syminfo.mintick
+
+// ================== CALCULOS DO CANDLE ==================
+bodySize   = math.abs(close - open)
+totalRange = high - low
+upperWick  = high - math.max(close, open)
+lowerWick  = math.min(close, open) - low
+
+// ================== IDENTIFICACAO DO DOJI ==================
+isDoji = totalRange > 0 and bodySize <= totalRange * dojiBodyPercent
+
+dojiUpperMaior = isDoji and upperWick > lowerWick
+dojiLowerMaior = isDoji and lowerWick > upperWick
+
+// ================== VISUAL ==================
+plotshape(isDoji, title="Doji", style=shape.labelup, location=location.belowbar, color=color.new(color.yellow, 0), text="Doji", textcolor=color.black, size=size.tiny)
+
+// ================== ENTRADAS ==================
+if dojiUpperMaior
+    stopLoss = low
+    dojiHeight = totalRange
+    takeProfit = close + dojiHeight * targetMultiplier
+    strategy.entry("Compra", strategy.long)
+    if usarStopAlvoFixo
+        strategy.exit("Saida Compra", from_entry="Compra", loss=stopFixoTicks, profit=alvoFixoTicks)
+    else
+        strategy.exit("Saida Compra", from_entry="Compra", stop=stopLoss, limit=takeProfit)
+
+if dojiLowerMaior
+    stopLoss = high
+    dojiHeight = totalRange
+    takeProfit = close - dojiHeight * targetMultiplier
+    strategy.entry("Venda", strategy.short)
+    if usarStopAlvoFixo
+        strategy.exit("Saida Venda", from_entry="Venda", loss=stopFixoTicks, profit=alvoFixoTicks)
+    else
+        strategy.exit("Saida Venda", from_entry="Venda", stop=stopLoss, limit=takeProfit)

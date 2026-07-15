@@ -1,0 +1,33 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+strategy("Abertura 10h - 1º Candle 15min", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// ===== Inputs =====
+sessionHour   = input.int(10, "Hora do candle de referência", minval=0, maxval=23)
+sessionMinute = input.int(0, "Minuto do candle de referência", minval=0, maxval=59)
+tpPerc        = input.float(50, "Take Profit (% da altura do candle)", minval=1) / 100
+slPerc        = input.float(25, "Stop Loss (% da altura do candle)", minval=1) / 100
+
+// ===== Controle diário =====
+var bool tradeTakenToday = false
+
+newDay = ta.change(time("D")) != 0
+if newDay
+    tradeTakenToday := false
+
+isSessionCandle = hour == sessionHour and minute == sessionMinute
+
+if isSessionCandle and barstate.isconfirmed and not tradeTakenToday
+    tradeTakenToday := true
+    rangeCandle = high - low
+    isBull = close > open
+    if isBull
+        tp = close + rangeCandle * tpPerc
+        sl = close - rangeCandle * slPerc
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Saida Long", "Long", limit=tp, stop=sl)
+    else
+        tp = close - rangeCandle * tpPerc
+        sl = close + rangeCandle * slPerc
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Saida Short", "Short", limit=tp, stop=sl)
