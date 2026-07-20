@@ -1,8 +1,10 @@
 //+------------------------------------------------------------------+
-//| abertura-1-candle-15min.mq5                                       |
-//| Migrado do Pine Script "Abertura 10h - 1o Candle". Direcao =       |
-//| candle da sessao de referencia (SessionHour:SessionMinute); stop   |
-//| estrutural = % da altura desse candle (ou fixo em pontos).         |
+//| cruzamento_ema_lite.mq5                                          |
+//| EA lite: cruzamento de EMA rapida/lenta. Compra quando a EMA     |
+//| rapida cruza para cima da EMA lenta no candle recem-fechado;     |
+//| vende quando cruza para baixo. Pensado para M5, com muitos       |
+//| gatilhos por dia. Stop especifico do sinal = minima/maxima do    |
+//| proprio candle do cruzamento (ou fixo em pontos).                 |
 //| ATENCAO: com AutoTrade=true e o AutoTrading do terminal ligado,   |
 //| este EA envia ordens REAIS. Revise o codigo e teste em conta demo |
 //| antes de usar em conta real.                                      |
@@ -10,38 +12,27 @@
 #property strict
 #include <Trade/Trade.mqh>
 
-input int    SessionHour   = 10;    // Hora do candle de referencia
-input int    SessionMinute = 0;     // Minuto do candle de referencia
-input double StopLossPerc  = 25.0;  // Stop estrutural (% da altura do candle de referencia)
-
-input bool OperarDomingo = false; // Operar no domingo
-input bool OperarSegunda = true;  // Operar na segunda-feira
-input bool OperarTerca   = true;  // Operar na terca-feira
-input bool OperarQuarta  = true;  // Operar na quarta-feira
-input bool OperarQuinta  = true;  // Operar na quinta-feira
-input bool OperarSexta   = true;  // Operar na sexta-feira
-input bool OperarSabado  = false; // Operar no sabado
-
-input bool   UseMAFilter    = true;  // ativar/desativar filtro de tendencia pela media movel
+input int    EMAFastPeriod  = 5;     // Periodo da EMA rapida
+input int    EMASlowPeriod  = 20;    // Periodo da EMA lenta
+input bool   UseMAFilter    = false; // ativar/desativar filtro extra de tendencia pela media movel
 input int    MAPeriod       = 50;    // Periodo da media movel de filtro de tendencia
 input ENUM_MA_METHOD MAMethod = MODE_SMA; // Metodo da media movel
-input double RiskRewardRatio = 2.00;
+input double RiskRewardRatio = 1.50;
 input double RiskPercent    = 1.0;   // % do saldo arriscado por trade
 input bool   UseFixedStopTarget = false; // usar stop/alvo fixos (em pontos) em vez do estrutural
 input double FixedStopPoints    = 200.0; // Stop fixo (pontos), se UseFixedStopTarget
-input double FixedTargetPoints  = 400.0; // Alvo fixo (pontos), se UseFixedStopTarget
+input double FixedTargetPoints  = 300.0; // Alvo fixo (pontos), se UseFixedStopTarget
 input bool   UseTradingWindow   = false; // restringir novas entradas a uma janela de horario
 input string TradingWindowStart = "09:00"; // Inicio da janela (HH:MM, hora do servidor)
 input string TradingWindowEnd   = "17:00"; // Fim da janela (HH:MM, hora do servidor)
-input int    SlippagePoints = 100;   // Desvio maximo
 input bool   AutoTrade      = false; // precisa ligar explicitamente
-input ulong  MagicNumber    = 20260713;
+input ulong  MagicNumber    = 20260716;
 input bool   DebugLog       = true;  // imprime diagnostico a cada candle fechado
 
 CTrade trade;
+int emaFastHandle;
+int emaSlowHandle;
 int maHandle;
-bool trade_taken_today = false;
-int last_trade_day = -1;
 
 bool ParseTimeToMinutes(const string time_text, int &minutes_total)
 {
@@ -74,10 +65,18 @@ bool IsWithinTradingWindow()
 
 int OnInit()
 {
-   if (SessionHour < 0 || SessionHour > 23 || SessionMinute < 0 || SessionMinute > 59)
+   emaFastHandle = iMA(_Symbol, PERIOD_CURRENT, EMAFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if (emaFastHandle == INVALID_HANDLE)
    {
-      Alert("Horario invalido para o candle de referencia.");
-      return INIT_PARAMETERS_INCORRECT;
+      Print("ERRO: falha ao criar handle da EMA rapida. GetLastError=", GetLastError());
+      return INIT_FAILED;
+   }
+
+   emaSlowHandle = iMA(_Symbol, PERIOD_CURRENT, EMASlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if (emaSlowHandle == INVALID_HANDLE)
+   {
+      Print("ERRO: falha ao criar handle da EMA lenta. GetLastError=", GetLastError());
+      return INIT_FAILED;
    }
 
    maHandle = INVALID_HANDLE;
@@ -101,16 +100,7 @@ int OnInit()
       }
    }
 
-   ENUM_SYMBOL_TRADE_MODE trade_mode = (ENUM_SYMBOL_TRADE_MODE)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
-   if (trade_mode != SYMBOL_TRADE_MODE_FULL)
-      Print("AVISO: ", _Symbol, " nao esta com trade mode FULL (modo atual pode restringir aberturas).");
-
    trade.SetExpertMagicNumber(MagicNumber);
-   trade.SetDeviationInPoints(SlippagePoints);
-
-   last_trade_day = -1;
-   trade_taken_today = false;
-
    if (!AutoTrade)
       Print("AVISO: AutoTrade=false. O EA nao vai enviar ordens ate voce ligar este input.");
    return INIT_SUCCEEDED;
@@ -118,28 +108,36 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   if (emaFastHandle != INVALID_HANDLE)
+      IndicatorRelease(emaFastHandle);
+   if (emaSlowHandle != INVALID_HANDLE)
+      IndicatorRelease(emaSlowHandle);
    if (maHandle != INVALID_HANDLE)
       IndicatorRelease(maHandle);
 }
 
 double LotsForRisk(double stopDistance)
 {
-   if (stopDistance <= 0) return 0.0;
+   if (stopDistance <= 0)
+      return 0.0;
    double riskAmount = AccountInfoDouble(ACCOUNT_BALANCE) * (RiskPercent / 100.0);
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if (tickSize <= 0) return 0.0;
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if (tickSize <= 0)
+      return 0.0;
    double lots = riskAmount / (stopDistance / tickSize * tickValue);
 
-   double step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   if (step <= 0) step = 0.01;
+   if (step <= 0)
+      step = 0.01;
 
    int decimals = (int)MathMax(0.0, MathRound(-MathLog10(step)));
    lots = NormalizeDouble(MathFloor(lots / step) * step, decimals);
 
-   if (lots > maxLot) lots = NormalizeDouble(MathFloor(maxLot / step) * step, decimals);
+   if (lots > maxLot)
+      lots = NormalizeDouble(MathFloor(maxLot / step) * step, decimals);
    return lots < minLot ? 0.0 : lots;
 }
 
@@ -148,93 +146,58 @@ bool HasOpenPosition()
    for (int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
-      if (ticket == 0) continue;
-      if (PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-      if (PositionGetInteger(POSITION_MAGIC) != (long)MagicNumber) continue;
+      if (ticket == 0)
+         continue;
+      if (PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if (PositionGetInteger(POSITION_MAGIC) != (long)MagicNumber)
+         continue;
       return true;
    }
    return false;
 }
 
-void ResetDailyControlIfNewDay()
-{
-   MqlDateTime now_struct;
-   TimeToStruct(TimeCurrent(), now_struct);
-
-   int today_key = now_struct.year * 1000 + now_struct.day_of_year;
-   if (today_key != last_trade_day)
-   {
-      last_trade_day = today_key;
-      trade_taken_today = false;
-   }
-}
-
-bool IsSessionCandle(const datetime candle_time)
-{
-   MqlDateTime candle_struct;
-   TimeToStruct(candle_time, candle_struct);
-   return (candle_struct.hour == SessionHour && candle_struct.min == SessionMinute);
-}
-
-bool IsWeekdayAllowed(const datetime candle_time)
-{
-   MqlDateTime candle_struct;
-   TimeToStruct(candle_time, candle_struct);
-
-   switch (candle_struct.day_of_week)
-   {
-   case 0: return OperarDomingo;
-   case 1: return OperarSegunda;
-   case 2: return OperarTerca;
-   case 3: return OperarQuarta;
-   case 4: return OperarQuinta;
-   case 5: return OperarSexta;
-   case 6: return OperarSabado;
-   default: return false;
-   }
-}
-
 void OnTick()
 {
-   if (!AutoTrade) return;
-   if (SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE) == SYMBOL_TRADE_MODE_DISABLED) return; // negociacao desabilitada no simbolo
-   if (HasOpenPosition()) return; // uma posicao por vez neste simbolo/EA
-   if (!IsWithinTradingWindow()) return; // fora da janela de horario configurada
+   if (!AutoTrade)
+      return;
+   if (SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE) == SYMBOL_TRADE_MODE_DISABLED)
+      return; // negociacao desabilitada no simbolo
+   if (HasOpenPosition())
+      return; // uma posicao por vez neste simbolo/EA
+   if (!IsWithinTradingWindow())
+      return; // fora da janela de horario configurada
 
    static datetime lastBarTime = 0;
    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   if (currentBarTime == lastBarTime) return; // so avalia uma vez por candle fechado
+   if (currentBarTime == lastBarTime)
+      return; // so avalia uma vez por candle fechado
    lastBarTime = currentBarTime;
 
-   int minBars = 3;
-   if (UseMAFilter) minBars = MathMax(minBars, MAPeriod + 2);
+   int minBars = EMASlowPeriod + 3;
+   if (UseMAFilter)
+      minBars = MathMax(minBars, MAPeriod + 2);
    if (Bars(_Symbol, PERIOD_CURRENT) < minBars)
    {
       Print("AVISO: barras insuficientes (minimo=", minBars, ")");
       return;
    }
 
-   ResetDailyControlIfNewDay();
-   if (trade_taken_today) return; // so 1 tentativa por dia, no candle da sessao
-
-   MqlRates mrate[];
-   ArraySetAsSeries(mrate, true);
-   if (CopyRates(_Symbol, PERIOD_CURRENT, 0, 2, mrate) < 2)
+   double fastBuf[2], slowBuf[2];
+   if (CopyBuffer(emaFastHandle, 0, 1, 2, fastBuf) <= 0)
    {
-      Print("ERRO: falha ao copiar rates. GetLastError=", GetLastError());
+      Print("ERRO: CopyBuffer da EMA rapida falhou. GetLastError=", GetLastError());
       return;
    }
-
-   // mrate[1] e o ultimo candle fechado.
-   if (!IsSessionCandle(mrate[1].time)) return;
-   if (!IsWeekdayAllowed(mrate[1].time)) return;
-
-   trade_taken_today = true; // nao tenta de novo hoje, mesmo se a ordem falhar
-
-   double range_candle = mrate[1].high - mrate[1].low;
-   if (range_candle <= 0.0) return;
-
-   bool is_bull = (mrate[1].close > mrate[1].open);
+   if (CopyBuffer(emaSlowHandle, 0, 1, 2, slowBuf) <= 0)
+   {
+      Print("ERRO: CopyBuffer da EMA lenta falhou. GetLastError=", GetLastError());
+      return;
+   }
+   double fast1 = fastBuf[0]; // EMA rapida no ultimo candle fechado
+   double fast2 = fastBuf[1]; // EMA rapida no candle anterior
+   double slow1 = slowBuf[0]; // EMA lenta no ultimo candle fechado
+   double slow2 = slowBuf[1]; // EMA lenta no candle anterior
 
    double maValue = 0.0;
    bool allowBuy  = true;
@@ -248,21 +211,28 @@ void OnTick()
          return;
       }
       maValue = maBuf[0];
-      allowBuy  = mrate[1].close > maValue;
-      allowSell = mrate[1].close < maValue;
+      double close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+      allowBuy  = close1 > maValue;
+      allowSell = close1 < maValue;
    }
 
+   bool crossUp   = fast2 <= slow2 && fast1 > slow1;   // EMA rapida cruzou para cima da lenta
+   bool crossDown = fast2 >= slow2 && fast1 < slow1;   // EMA rapida cruzou para baixo da lenta
+
    if (DebugLog)
-      Print("SESSAO ", TimeToString(mrate[1].time), " open=", mrate[1].open, " close=", mrate[1].close,
-            " range=", range_candle, " is_bull=", is_bull,
+      Print("BARRA ", TimeToString(currentBarTime), " fast1=", fast1, " slow1=", slow1,
+            " fast2=", fast2, " slow2=", slow2, " crossUp=", crossUp, " crossDown=", crossDown,
             " maValue=", maValue, " allowBuy=", allowBuy, " allowSell=", allowSell);
 
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double entry = mrate[1].close;
+   double high1 = iHigh(_Symbol, PERIOD_CURRENT, 1);
+   double low1  = iLow(_Symbol, PERIOD_CURRENT, 1);
 
-   if (is_bull && allowBuy)
+   if (crossUp && allowBuy)
    {
-      double stop = UseFixedStopTarget ? entry - FixedStopPoints * point : entry - range_candle * (StopLossPerc / 100.0);
+      // EMA rapida cruzou para cima => compra, stop = minima do candle do cruzamento (ou fixo)
+      double entry = iClose(_Symbol, PERIOD_CURRENT, 1);
+      double stop = UseFixedStopTarget ? entry - FixedStopPoints * point : low1;
       double target = UseFixedStopTarget ? entry + FixedTargetPoints * point
                                           : entry + (entry - stop) * RiskRewardRatio;
       double lots = LotsForRisk(entry - stop);
@@ -272,9 +242,11 @@ void OnTick()
          Print("ERRO ao enviar BUY: retcode=", trade.ResultRetcode(),
                " desc=", trade.ResultRetcodeDescription());
    }
-   else if (!is_bull && allowSell)
+   else if (crossDown && allowSell)
    {
-      double stop = UseFixedStopTarget ? entry + FixedStopPoints * point : entry + range_candle * (StopLossPerc / 100.0);
+      // EMA rapida cruzou para baixo => venda, stop = maxima do candle do cruzamento (ou fixo)
+      double entry = iClose(_Symbol, PERIOD_CURRENT, 1);
+      double stop = UseFixedStopTarget ? entry + FixedStopPoints * point : high1;
       double target = UseFixedStopTarget ? entry - FixedTargetPoints * point
                                           : entry - (stop - entry) * RiskRewardRatio;
       double lots = LotsForRisk(stop - entry);

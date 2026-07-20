@@ -1,8 +1,9 @@
 //+------------------------------------------------------------------+
-//| abertura-1-candle-15min.mq5                                       |
-//| Migrado do Pine Script "Abertura 10h - 1o Candle". Direcao =       |
-//| candle da sessao de referencia (SessionHour:SessionMinute); stop   |
-//| estrutural = % da altura desse candle (ou fixo em pontos).         |
+//| rsi_extremo_lite.mq5                                              |
+//| EA lite: RSI de pullback filtrado por tendencia da MA. RSI <=     |
+//| RSIOversold (default 30) so compra se preco > MA (uptrend). RSI   |
+//| >= RSIOverbought (default 70) so vende se preco < MA (downtrend). |
+//| Stop estrutural por lookback (Highest/Lowest) ou fixo em pontos.  |
 //| ATENCAO: com AutoTrade=true e o AutoTrading do terminal ligado,   |
 //| este EA envia ordens REAIS. Revise o codigo e teste em conta demo |
 //| antes de usar em conta real.                                      |
@@ -10,18 +11,10 @@
 #property strict
 #include <Trade/Trade.mqh>
 
-input int    SessionHour   = 10;    // Hora do candle de referencia
-input int    SessionMinute = 0;     // Minuto do candle de referencia
-input double StopLossPerc  = 25.0;  // Stop estrutural (% da altura do candle de referencia)
-
-input bool OperarDomingo = false; // Operar no domingo
-input bool OperarSegunda = true;  // Operar na segunda-feira
-input bool OperarTerca   = true;  // Operar na terca-feira
-input bool OperarQuarta  = true;  // Operar na quarta-feira
-input bool OperarQuinta  = true;  // Operar na quinta-feira
-input bool OperarSexta   = true;  // Operar na sexta-feira
-input bool OperarSabado  = false; // Operar no sabado
-
+input double RSIOversold    = 30.0;  // RSI <= este valor => compra (pullback dentro de tendencia de alta)
+input double RSIOverbought  = 70.0;  // RSI >= este valor => venda (pullback dentro de tendencia de baixa)
+input int    RSIPeriod      = 14;    // Periodo do RSI
+input int    StopLookback   = 10;    // candles p/ minima/maxima recente (stop estrutural)
 input bool   UseMAFilter    = true;  // ativar/desativar filtro de tendencia pela media movel
 input int    MAPeriod       = 50;    // Periodo da media movel de filtro de tendencia
 input ENUM_MA_METHOD MAMethod = MODE_SMA; // Metodo da media movel
@@ -33,15 +26,13 @@ input double FixedTargetPoints  = 400.0; // Alvo fixo (pontos), se UseFixedStopT
 input bool   UseTradingWindow   = false; // restringir novas entradas a uma janela de horario
 input string TradingWindowStart = "09:00"; // Inicio da janela (HH:MM, hora do servidor)
 input string TradingWindowEnd   = "17:00"; // Fim da janela (HH:MM, hora do servidor)
-input int    SlippagePoints = 100;   // Desvio maximo
 input bool   AutoTrade      = false; // precisa ligar explicitamente
-input ulong  MagicNumber    = 20260713;
+input ulong  MagicNumber    = 20260715;
 input bool   DebugLog       = true;  // imprime diagnostico a cada candle fechado
 
 CTrade trade;
+int rsiHandle;
 int maHandle;
-bool trade_taken_today = false;
-int last_trade_day = -1;
 
 bool ParseTimeToMinutes(const string time_text, int &minutes_total)
 {
@@ -74,10 +65,11 @@ bool IsWithinTradingWindow()
 
 int OnInit()
 {
-   if (SessionHour < 0 || SessionHour > 23 || SessionMinute < 0 || SessionMinute > 59)
+   rsiHandle = iRSI(_Symbol, PERIOD_CURRENT, RSIPeriod, PRICE_CLOSE);
+   if (rsiHandle == INVALID_HANDLE)
    {
-      Alert("Horario invalido para o candle de referencia.");
-      return INIT_PARAMETERS_INCORRECT;
+      Print("ERRO: falha ao criar handle do RSI. GetLastError=", GetLastError());
+      return INIT_FAILED;
    }
 
    maHandle = INVALID_HANDLE;
@@ -101,16 +93,7 @@ int OnInit()
       }
    }
 
-   ENUM_SYMBOL_TRADE_MODE trade_mode = (ENUM_SYMBOL_TRADE_MODE)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE);
-   if (trade_mode != SYMBOL_TRADE_MODE_FULL)
-      Print("AVISO: ", _Symbol, " nao esta com trade mode FULL (modo atual pode restringir aberturas).");
-
    trade.SetExpertMagicNumber(MagicNumber);
-   trade.SetDeviationInPoints(SlippagePoints);
-
-   last_trade_day = -1;
-   trade_taken_today = false;
-
    if (!AutoTrade)
       Print("AVISO: AutoTrade=false. O EA nao vai enviar ordens ate voce ligar este input.");
    return INIT_SUCCEEDED;
@@ -118,8 +101,22 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   if (rsiHandle != INVALID_HANDLE)
+      IndicatorRelease(rsiHandle);
    if (maHandle != INVALID_HANDLE)
       IndicatorRelease(maHandle);
+}
+
+double Highest(int shift, int count)
+{
+   int idx = iHighest(_Symbol, PERIOD_CURRENT, MODE_HIGH, count, shift);
+   return idx >= 0 ? iHigh(_Symbol, PERIOD_CURRENT, idx) : 0.0;
+}
+
+double Lowest(int shift, int count)
+{
+   int idx = iLowest(_Symbol, PERIOD_CURRENT, MODE_LOW, count, shift);
+   return idx >= 0 ? iLow(_Symbol, PERIOD_CURRENT, idx) : 0.0;
 }
 
 double LotsForRisk(double stopDistance)
@@ -156,44 +153,6 @@ bool HasOpenPosition()
    return false;
 }
 
-void ResetDailyControlIfNewDay()
-{
-   MqlDateTime now_struct;
-   TimeToStruct(TimeCurrent(), now_struct);
-
-   int today_key = now_struct.year * 1000 + now_struct.day_of_year;
-   if (today_key != last_trade_day)
-   {
-      last_trade_day = today_key;
-      trade_taken_today = false;
-   }
-}
-
-bool IsSessionCandle(const datetime candle_time)
-{
-   MqlDateTime candle_struct;
-   TimeToStruct(candle_time, candle_struct);
-   return (candle_struct.hour == SessionHour && candle_struct.min == SessionMinute);
-}
-
-bool IsWeekdayAllowed(const datetime candle_time)
-{
-   MqlDateTime candle_struct;
-   TimeToStruct(candle_time, candle_struct);
-
-   switch (candle_struct.day_of_week)
-   {
-   case 0: return OperarDomingo;
-   case 1: return OperarSegunda;
-   case 2: return OperarTerca;
-   case 3: return OperarQuarta;
-   case 4: return OperarQuinta;
-   case 5: return OperarSexta;
-   case 6: return OperarSabado;
-   default: return false;
-   }
-}
-
 void OnTick()
 {
    if (!AutoTrade) return;
@@ -206,7 +165,7 @@ void OnTick()
    if (currentBarTime == lastBarTime) return; // so avalia uma vez por candle fechado
    lastBarTime = currentBarTime;
 
-   int minBars = 3;
+   int minBars = MathMax(RSIPeriod + 2, StopLookback + 2);
    if (UseMAFilter) minBars = MathMax(minBars, MAPeriod + 2);
    if (Bars(_Symbol, PERIOD_CURRENT) < minBars)
    {
@@ -214,27 +173,13 @@ void OnTick()
       return;
    }
 
-   ResetDailyControlIfNewDay();
-   if (trade_taken_today) return; // so 1 tentativa por dia, no candle da sessao
-
-   MqlRates mrate[];
-   ArraySetAsSeries(mrate, true);
-   if (CopyRates(_Symbol, PERIOD_CURRENT, 0, 2, mrate) < 2)
+   double rsiBuf[1];
+   if (CopyBuffer(rsiHandle, 0, 1, 1, rsiBuf) <= 0)
    {
-      Print("ERRO: falha ao copiar rates. GetLastError=", GetLastError());
+      Print("ERRO: CopyBuffer do RSI falhou. GetLastError=", GetLastError());
       return;
    }
-
-   // mrate[1] e o ultimo candle fechado.
-   if (!IsSessionCandle(mrate[1].time)) return;
-   if (!IsWeekdayAllowed(mrate[1].time)) return;
-
-   trade_taken_today = true; // nao tenta de novo hoje, mesmo se a ordem falhar
-
-   double range_candle = mrate[1].high - mrate[1].low;
-   if (range_candle <= 0.0) return;
-
-   bool is_bull = (mrate[1].close > mrate[1].open);
+   double rsi1 = rsiBuf[0];
 
    double maValue = 0.0;
    bool allowBuy  = true;
@@ -248,21 +193,26 @@ void OnTick()
          return;
       }
       maValue = maBuf[0];
-      allowBuy  = mrate[1].close > maValue;
-      allowSell = mrate[1].close < maValue;
+      double close1 = iClose(_Symbol, PERIOD_CURRENT, 1);
+      allowBuy  = close1 > maValue;
+      allowSell = close1 < maValue;
    }
 
+   bool isOversold   = rsi1 <= RSIOversold;
+   bool isOverbought = rsi1 >= RSIOverbought;
+
    if (DebugLog)
-      Print("SESSAO ", TimeToString(mrate[1].time), " open=", mrate[1].open, " close=", mrate[1].close,
-            " range=", range_candle, " is_bull=", is_bull,
+      Print("BARRA ", TimeToString(currentBarTime), " rsi1=", rsi1,
+            " isOversold=", isOversold, " isOverbought=", isOverbought,
             " maValue=", maValue, " allowBuy=", allowBuy, " allowSell=", allowSell);
 
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   double entry = mrate[1].close;
 
-   if (is_bull && allowBuy)
+   if (isOversold && allowBuy)
    {
-      double stop = UseFixedStopTarget ? entry - FixedStopPoints * point : entry - range_candle * (StopLossPerc / 100.0);
+      // RSI em pullback de sobrevenda, preco acima da MA (uptrend) => compra a favor da tendencia
+      double entry = iClose(_Symbol, PERIOD_CURRENT, 1);
+      double stop = UseFixedStopTarget ? entry - FixedStopPoints * point : Lowest(1, StopLookback);
       double target = UseFixedStopTarget ? entry + FixedTargetPoints * point
                                           : entry + (entry - stop) * RiskRewardRatio;
       double lots = LotsForRisk(entry - stop);
@@ -272,9 +222,11 @@ void OnTick()
          Print("ERRO ao enviar BUY: retcode=", trade.ResultRetcode(),
                " desc=", trade.ResultRetcodeDescription());
    }
-   else if (!is_bull && allowSell)
+   else if (isOverbought && allowSell)
    {
-      double stop = UseFixedStopTarget ? entry + FixedStopPoints * point : entry + range_candle * (StopLossPerc / 100.0);
+      // RSI em pullback de sobrecompra, preco abaixo da MA (downtrend) => venda a favor da tendencia
+      double entry = iClose(_Symbol, PERIOD_CURRENT, 1);
+      double stop = UseFixedStopTarget ? entry + FixedStopPoints * point : Highest(1, StopLookback);
       double target = UseFixedStopTarget ? entry - FixedTargetPoints * point
                                           : entry - (stop - entry) * RiskRewardRatio;
       double lots = LotsForRisk(stop - entry);
