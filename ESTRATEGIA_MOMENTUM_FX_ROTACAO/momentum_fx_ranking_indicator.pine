@@ -1,0 +1,82 @@
+// Momentum FX Rotacao - Ranking Cross-Sectional (indicador, TradingView)
+// Adaptado de quantpedia.com/strategies/momentum-in-mutual-fund-returns
+// Mesma logica de ranking do EA MT5 desta pasta (expert-index.mq5):
+// momentum de N dias uteis numa cesta de pares FX, ordenado do maior
+// para o menor. Isto e so um PAINEL DE RANKING -- nao executa ordens.
+// strategy() no Pine so opera no simbolo do grafico (nao existe backtest
+// de portfolio multi-simbolo de verdade); para um backtest de entradas
+// use momentum_fx_rotation_strategy.pine (mesma pasta).
+//
+// Ajuste os prefixos de exchange em InpUniverse (FX:, OANDA:, FX_IDC:,
+// FOREXCOM: etc.) conforme o feed de dados que voce usa no TradingView.
+// Limite pratico: TradingView permite ate ~40 simbolos distintos via
+// request.security() por script -- os 28 pares default ficam dentro
+// desse limite.
+//@version=6
+indicator("Momentum FX Rotacao - Ranking", overlay=false)
+
+// ====== INPUTS ======
+i_universe = input.text_area(
+     "FX:EURUSD,FX:GBPUSD,FX:USDJPY,FX:USDCHF,FX:USDCAD,FX:AUDUSD,FX:NZDUSD,FX:EURGBP,FX:EURJPY,FX:EURCHF,FX:EURCAD,FX:EURAUD,FX:EURNZD,FX:GBPJPY,FX:GBPCHF,FX:GBPCAD,FX:GBPAUD,FX:GBPNZD,FX:AUDJPY,FX:AUDCHF,FX:AUDCAD,FX:AUDNZD,FX:NZDJPY,FX:CADJPY,FX:CHFJPY,FX:CADCHF,FX:NZDCHF,FX:NZDCAD",
+     title="Universo (tickers TradingView, separados por virgula)")
+i_momLen     = input.int(126, "Janela de momentum (dias uteis, 126 ~ 6 meses)", minval=5)
+i_topPct     = input.float(20.0, "Top % (destacado em verde)", minval=1.0, maxval=100.0)
+i_allowShort = input.bool(false, "Destacar tambem o Bottom % (em vermelho)")
+i_bottomPct  = input.float(20.0, "Bottom %", minval=1.0, maxval=100.0)
+i_maxRows    = input.int(15, "Max linhas na tabela", minval=1, maxval=40)
+
+// ====== UNIVERSO (parse do csv, uma vez) ======
+var string[] g_universe = array.new<string>()
+if barstate.isfirst
+    parts = str.split(i_universe, ",")
+    for p in parts
+        sym = str.replace_all(p, " ", "")
+        if str.length(sym) > 0
+            array.push(g_universe, sym)
+
+// ====== TABELA (criada uma vez, atualizada so na ultima barra) ======
+var table t = table.new(position.top_right, 3, i_maxRows + 1, border_width=1)
+
+if barstate.islast
+    n = array.size(g_universe)
+
+    validSymbols = array.new<string>()
+    validMom     = array.new<float>()
+
+    for i = 0 to n - 1
+        sym = array.get(g_universe, i)
+        // dynamic request: symbol varia por iteracao do loop (suportado
+        // desde a atualizacao de "dynamic requests" do Pine)
+        [c0, c1] = request.security(sym, "D", [close, close[i_momLen]], barmerge.gaps_off, barmerge.lookahead_off)
+        if not na(c0) and not na(c1) and c1 != 0
+            array.push(validSymbols, sym)
+            array.push(validMom, (c0 - c1) / c1)
+
+    nValid = array.size(validMom)
+
+    table.clear(t, 0, 0, 2, math.max(1, i_maxRows))
+
+    table.cell(t, 0, 0, "Rank", bgcolor=color.gray, text_color=color.white)
+    table.cell(t, 1, 0, "Simbolo", bgcolor=color.gray, text_color=color.white)
+    table.cell(t, 2, 0, "Momentum " + str.tostring(i_momLen) + "d", bgcolor=color.gray, text_color=color.white)
+
+    if nValid > 0
+        idx = array.sort_indices(validMom, order.descending)
+        topCount = int(math.max(1, math.round(nValid * i_topPct / 100.0)))
+        bottomCount = i_allowShort ? int(math.max(1, math.round(nValid * i_bottomPct / 100.0))) : 0
+
+        rows = math.min(i_maxRows, nValid)
+        for r = 0 to rows - 1
+            srcIdx = array.get(idx, r)
+            sym = array.get(validSymbols, srcIdx)
+            mom = array.get(validMom, srcIdx)
+
+            isTop = r < topCount
+            isBottom = i_allowShort and r >= (nValid - bottomCount)
+            bg = isTop ? color.new(color.green, 70) : isBottom ? color.new(color.red, 70) : color.new(color.gray, 90)
+
+            table.cell(t, 0, r + 1, str.tostring(r + 1), bgcolor=bg)
+            table.cell(t, 1, r + 1, sym, bgcolor=bg)
+            table.cell(t, 2, r + 1, str.tostring(mom * 100, "#.##") + "%", bgcolor=bg)
+    else
+        table.cell(t, 0, 1, "sem dados suficientes", text_color=color.orange)

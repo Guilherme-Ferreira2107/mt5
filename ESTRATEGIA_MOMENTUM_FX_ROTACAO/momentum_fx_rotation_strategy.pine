@@ -1,0 +1,106 @@
+// Momentum FX Rotacao - Backtest por Simbolo (strategy, TradingView)
+// Adaptado de quantpedia.com/strategies/momentum-in-mutual-fund-returns
+//
+// LIMITACAO IMPORTANTE: strategy() no Pine so envia ordens no simbolo do
+// GRAFICO onde o script esta rodando -- nao existe backtest de portfolio
+// multi-simbolo de verdade no TradingView (ver expert-index.mq5, na
+// mesma pasta, para a versao MT5 que realmente abre posicoes em varios
+// pares ao mesmo tempo). Este script e uma APROXIMACAO por simbolo: ele
+// calcula o momentum de N dias uteis do simbolo do grafico E de toda a
+// cesta InpUniverse (via request.security), acha o rank do simbolo do
+// grafico dentro dessa cesta, e so fica comprado/vendido nele quando o
+// rank cai no Top/Bottom % configurado -- rebalanceado a cada N meses,
+// igual ao EA. Rode o mesmo script trocando o simbolo do grafico para
+// ver o backtest individual de cada par da cesta.
+//
+// Nao inclua o simbolo do grafico dentro de InpUniverse (o script ja
+// calcula o momentum dele separadamente) para nao contar duas vezes no
+// ranking.
+//
+// Ajuste os prefixos de exchange em InpUniverse (FX:, OANDA:, FX_IDC:,
+// FOREXCOM: etc.) conforme o feed de dados que voce usa no TradingView.
+// Recomendado rodar em grafico Diario (D) -- o momentum e sempre
+// calculado em dados diarios (request.security "D"), mas o rebalanceio
+// dispara na primeira barra de cada mes DO GRAFICO, entao um grafico
+// intradiario dispara o rebalanceio tarde (na primeira barra intradiaria
+// do mes) e um grafico semanal/mensal pode nunca alinhar certinho.
+//@version=6
+strategy("Momentum FX Rotacao - Backtest por Simbolo",
+     overlay=true,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     initial_capital=100000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.005,
+     slippage=2)
+
+// ====== INPUTS ======
+i_universe = input.text_area(
+     "FX:GBPUSD,FX:USDJPY,FX:USDCHF,FX:USDCAD,FX:AUDUSD,FX:NZDUSD,FX:EURGBP,FX:EURJPY,FX:EURCHF,FX:EURCAD,FX:EURAUD,FX:EURNZD,FX:GBPJPY,FX:GBPCHF,FX:GBPCAD,FX:GBPAUD,FX:GBPNZD,FX:AUDJPY,FX:AUDCHF,FX:AUDCAD,FX:AUDNZD,FX:NZDJPY,FX:CADJPY,FX:CHFJPY,FX:CADCHF,FX:NZDCHF,FX:NZDCAD",
+     title="Resto da cesta (sem o simbolo do grafico, tickers TradingView)")
+i_momLen           = input.int(126, "Janela de momentum (dias uteis, 126 ~ 6 meses)", minval=5)
+i_rebalanceMonths  = input.int(3, "Rebalancear a cada N meses", minval=1)
+i_topPct           = input.float(20.0, "Top % (compra)", minval=1.0, maxval=100.0)
+i_allowShort       = input.bool(false, "Vender no Bottom % (long-short)")
+i_bottomPct        = input.float(20.0, "Bottom % (venda)", minval=1.0, maxval=100.0)
+
+// ====== UNIVERSO (parse do csv, uma vez) ======
+var string[] g_universe = array.new<string>()
+if barstate.isfirst
+    parts = str.split(i_universe, ",")
+    for p in parts
+        sym = str.replace_all(p, " ", "")
+        if str.length(sym) > 0
+            array.push(g_universe, sym)
+
+// ====== RELOGIO (mesma regra do EA: dispara no 1o "mes novo" de cada
+// N meses, ver AddMonths/g_nextRebalanceTime em expert-index.mq5) ======
+monthIndex = year(time) * 12 + (month(time) - 1)
+newMonth = monthIndex != monthIndex[1]
+var int lastRebalanceMonth = na
+rebalanceDue = newMonth and (na(lastRebalanceMonth) or (monthIndex - lastRebalanceMonth) >= i_rebalanceMonths)
+
+var int g_direction = 0  // 1 = comprado, -1 = vendido, 0 = fora do ranking
+
+if rebalanceDue
+    lastRebalanceMonth := monthIndex
+
+    n = array.size(g_universe)
+    validMom = array.new<float>()
+
+    for i = 0 to n - 1
+        sym = array.get(g_universe, i)
+        [c0, c1] = request.security(sym, "D", [close, close[i_momLen]], barmerge.gaps_off, barmerge.lookahead_off)
+        if not na(c0) and not na(c1) and c1 != 0
+            array.push(validMom, (c0 - c1) / c1)
+
+    [s0, s1] = request.security(syminfo.tickerid, "D", [close, close[i_momLen]], barmerge.gaps_off, barmerge.lookahead_off)
+    selfMom = (not na(s0) and not na(s1) and s1 != 0) ? (s0 - s1) / s1 : na
+
+    if na(selfMom)
+        g_direction := 0
+    else
+        rankOfSelf = 0
+        for m in validMom
+            if m > selfMom
+                rankOfSelf += 1
+        nTotal = array.size(validMom) + 1
+
+        topCount = int(math.max(1, math.round(nTotal * i_topPct / 100.0)))
+        bottomCount = i_allowShort ? int(math.max(1, math.round(nTotal * i_bottomPct / 100.0))) : 0
+
+        if rankOfSelf < topCount
+            g_direction := 1
+        else if i_allowShort and rankOfSelf >= (nTotal - bottomCount)
+            g_direction := -1
+        else
+            g_direction := 0
+
+    if g_direction == 1
+        strategy.entry("Long", strategy.long)
+    else if g_direction == -1
+        strategy.entry("Short", strategy.short)
+    else
+        strategy.close_all(comment="FORA_DO_RANKING")
+
+plot(g_direction, title="Direcao (1=long,-1=short,0=fora)", display=display.data_window)
