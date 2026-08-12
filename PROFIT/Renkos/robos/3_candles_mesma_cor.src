@@ -1,0 +1,82 @@
+Parametro
+  AlvoPontos(3.0);
+  StopPontos(3.0);
+  OperarSomentePrimeiraSexta(false);
+
+var
+  TresCandlesAlta, TresCandlesBaixa : boolean;
+  DataPermitida : boolean;
+  PrecoEntradaCompra, PrecoEntradaVenda : real;
+
+begin
+  { Quando o filtro esta desligado, permite operar todos os dias.
+    Quando ligado, permite entradas somente na primeira sexta do mes.
+    Toda primeira sexta-feira ocorre entre os dias 1 e 7. }
+  DataPermitida :=
+    (not OperarSomentePrimeiraSexta) or
+    ((DayOfWeek(Date) = 5) and (DayOfMonth(Date) <= 7));
+
+  { =========================================================
+    Gatilhos
+
+    A verificacao do quarto candle impede um novo sinal no
+    quarto, quinto etc. candle de uma mesma sequencia.
+    Um doji (Fechamento = Abertura) interrompe a sequencia.
+    ========================================================= }
+  TresCandlesAlta :=
+    (CurrentBar >= 4) and
+    (Fechamento > Abertura) and
+    (Fechamento[1] > Abertura[1]) and
+    (Fechamento[2] > Abertura[2]) and
+    (Fechamento[3] <= Abertura[3]);
+
+  TresCandlesBaixa :=
+    (CurrentBar >= 4) and
+    (Fechamento < Abertura) and
+    (Fechamento[1] < Abertura[1]) and
+    (Fechamento[2] < Abertura[2]) and
+    (Fechamento[3] >= Abertura[3]);
+
+  { =========================================================
+    Gerenciamento da posicao comprada
+    ========================================================= }
+  if IsBought then
+  begin
+    if not IsBought[1] then
+      PrecoEntradaCompra := Price
+    else
+      PrecoEntradaCompra := PrecoEntradaCompra[1];
+
+    SellToCoverLimit(PrecoEntradaCompra + AlvoPontos);
+    SellToCoverStop(PrecoEntradaCompra - StopPontos);
+  end
+  else
+    PrecoEntradaCompra := 0;
+
+  { =========================================================
+    Gerenciamento da posicao vendida
+    ========================================================= }
+  if IsSold then
+  begin
+    if not IsSold[1] then
+      PrecoEntradaVenda := Price
+    else
+      PrecoEntradaVenda := PrecoEntradaVenda[1];
+
+    BuyToCoverLimit(PrecoEntradaVenda - AlvoPontos);
+    BuyToCoverStop(PrecoEntradaVenda + StopPontos);
+  end
+  else
+    PrecoEntradaVenda := 0;
+
+  { =========================================================
+    Entradas a mercado no fechamento do terceiro candle
+    ========================================================= }
+  if DataPermitida and (not IsBought) and (not IsSold) then
+  begin
+    if TresCandlesAlta then
+      BuyAtMarket
+    else if TresCandlesBaixa then
+      SellShortAtMarket;
+  end;
+end;

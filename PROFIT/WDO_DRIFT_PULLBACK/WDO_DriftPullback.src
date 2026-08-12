@@ -1,0 +1,331 @@
+Parametro
+  QuantidadeContratos(1);
+
+  { Configuracao para grafico de 5 minutos }
+  BarrasDirecaoVWAP(3);
+  BarrasRetornoHora(12);
+  RetornoMinimoPercentual(0.10);
+  InclinacaoMinimaVWAP(1.0);
+
+  UsarFiltroMedias(true);
+  PeriodoMediaRapida(20);
+  PeriodoMediaLenta(50);
+
+  UsarConfirmacaoRompimento(true);
+  BarrasValidadeConfirmacao(3);
+  MinimoBarrasEntreOperacoes(6);
+  DistanciaMaximaVWAP(5.0);
+  CorpoMinimoCandle(0.5);
+  CorpoMaximoCandle(5.0);
+
+  { Horarios de Brasilia usados pelo grafico do WDO }
+  HorarioInicioOperacao(0915);
+  HorarioLimiteEntrada(1300);
+  HorarioZeragem(1755);
+
+  MaximoOperacoesDia(4);
+  MaximoPerdasDia(2);
+
+  { WDO: 1 ponto = R$ 10 por contrato }
+  StopCompraPontos(5.0);
+  AlvoCompraPontos(8.0);
+  StopVendaPontos(5.0);
+  AlvoVendaPontos(8.0);
+
+  ExibirVWAP(true);
+  ExibirMedias(true);
+  ExibirSinais(true);
+
+var
+  ValorVWAP, MediaRapida, MediaLenta : real;
+  InclinacaoVWAP, RetornoHora : real;
+  DistanciaAtual, DistanciaAnterior, CorpoCandle : real;
+  PrecoEntradaCompra, PrecoEntradaVenda : real;
+  ResultadoAntesEntrada : real;
+
+  FiltroMediaCompra, FiltroMediaVenda : boolean;
+  RegimeCompra, RegimeVenda : boolean;
+  CandlePullbackCompra, CandlePullbackVenda : boolean;
+  GatilhoCompra, GatilhoVenda : boolean;
+  GatilhoUsadoCompra, GatilhoUsadoVenda : boolean;
+  AguardandoCompra, AguardandoVenda : boolean;
+  PodeAbrirPosicao : boolean;
+  EntradaCompra, EntradaVenda : boolean;
+
+  NivelConfirmacaoCompra, NivelConfirmacaoVenda : real;
+  BarraPullbackCompra, BarraPullbackVenda : integer;
+  UltimaBarraEntrada : integer;
+  OperacoesHoje, PerdasHoje : integer;
+
+begin
+  { =========================================================
+    Estado diario
+    ========================================================= }
+  if (CurrentBar = 1) or (Date <> Date[1]) then
+  begin
+    OperacoesHoje := 0;
+    PerdasHoje := 0;
+    GatilhoUsadoCompra := false;
+    GatilhoUsadoVenda := false;
+    AguardandoCompra := false;
+    AguardandoVenda := false;
+    BarraPullbackCompra := 0;
+    BarraPullbackVenda := 0;
+    UltimaBarraEntrada := 0;
+    ResultadoAntesEntrada := DailyResult(false);
+  end
+  else
+  begin
+    OperacoesHoje := OperacoesHoje[1];
+    PerdasHoje := PerdasHoje[1];
+    GatilhoUsadoCompra := GatilhoUsadoCompra[1];
+    GatilhoUsadoVenda := GatilhoUsadoVenda[1];
+    AguardandoCompra := AguardandoCompra[1];
+    AguardandoVenda := AguardandoVenda[1];
+    BarraPullbackCompra := BarraPullbackCompra[1];
+    BarraPullbackVenda := BarraPullbackVenda[1];
+    NivelConfirmacaoCompra := NivelConfirmacaoCompra[1];
+    NivelConfirmacaoVenda := NivelConfirmacaoVenda[1];
+    UltimaBarraEntrada := UltimaBarraEntrada[1];
+    ResultadoAntesEntrada := ResultadoAntesEntrada[1];
+  end;
+
+  { =========================================================
+    Indicadores
+    ========================================================= }
+  ValorVWAP := VWAP(1);
+  MediaRapida := MediaExp(PeriodoMediaRapida, Fechamento);
+  MediaLenta := MediaExp(PeriodoMediaLenta, Fechamento);
+
+  if CurrentBar > BarrasRetornoHora then
+    RetornoHora :=
+      ((Fechamento / Fechamento[BarrasRetornoHora]) - 1) * 100
+  else
+    RetornoHora := 0;
+
+  if CurrentBar > BarrasDirecaoVWAP then
+    InclinacaoVWAP :=
+      ValorVWAP - ValorVWAP[BarrasDirecaoVWAP]
+  else
+    InclinacaoVWAP := 0;
+
+  FiltroMediaCompra :=
+    (not UsarFiltroMedias) or
+    ((Fechamento > MediaRapida) and
+     (MediaRapida > MediaLenta));
+
+  FiltroMediaVenda :=
+    (not UsarFiltroMedias) or
+    ((Fechamento < MediaRapida) and
+     (MediaRapida < MediaLenta));
+
+  { =========================================================
+    Regime direcional
+
+    Exige retorno de uma hora, VWAP inclinada por pelo menos
+    o valor configurado e alinhamento opcional das medias.
+    ========================================================= }
+  RegimeCompra :=
+    (CurrentBar > PeriodoMediaLenta) and
+    (CurrentBar > BarrasRetornoHora) and
+    (Fechamento > ValorVWAP) and
+    (InclinacaoVWAP >= InclinacaoMinimaVWAP) and
+    (RetornoHora >= RetornoMinimoPercentual) and
+    FiltroMediaCompra;
+
+  RegimeVenda :=
+    (CurrentBar > PeriodoMediaLenta) and
+    (CurrentBar > BarrasRetornoHora) and
+    (Fechamento < ValorVWAP) and
+    (InclinacaoVWAP <= -InclinacaoMinimaVWAP) and
+    (RetornoHora <= -RetornoMinimoPercentual) and
+    FiltroMediaVenda;
+
+  { =========================================================
+    Pullback
+
+    O candle precisa se aproximar da VWAP, permanecer do lado
+    do regime e ter corpo dentro da faixa configurada.
+    ========================================================= }
+  DistanciaAtual := Abs(Fechamento - ValorVWAP);
+  DistanciaAnterior := Abs(Fechamento[1] - ValorVWAP[1]);
+  CorpoCandle := Abs(Fechamento - Abertura);
+
+  CandlePullbackCompra :=
+    (Fechamento < Abertura) and
+    (Minima >= ValorVWAP) and
+    (DistanciaAtual < DistanciaAnterior) and
+    (DistanciaAtual <= DistanciaMaximaVWAP) and
+    (CorpoCandle >= CorpoMinimoCandle) and
+    (CorpoCandle <= CorpoMaximoCandle);
+
+  CandlePullbackVenda :=
+    (Fechamento > Abertura) and
+    (Maxima <= ValorVWAP) and
+    (DistanciaAtual < DistanciaAnterior) and
+    (DistanciaAtual <= DistanciaMaximaVWAP) and
+    (CorpoCandle >= CorpoMinimoCandle) and
+    (CorpoCandle <= CorpoMaximoCandle);
+
+  { Registra o pullback e permite que a confirmacao aconteca
+    dentro das proximas BarrasValidadeConfirmacao barras. }
+  if RegimeCompra and CandlePullbackCompra and
+     (not IsBought) and (not IsSold) then
+  begin
+    AguardandoCompra := true;
+    BarraPullbackCompra := CurrentBar;
+    NivelConfirmacaoCompra := Maxima;
+  end;
+
+  if RegimeVenda and CandlePullbackVenda and
+     (not IsBought) and (not IsSold) then
+  begin
+    AguardandoVenda := true;
+    BarraPullbackVenda := CurrentBar;
+    NivelConfirmacaoVenda := Minima;
+  end;
+
+  if (not RegimeCompra) or
+     (CurrentBar > BarraPullbackCompra + BarrasValidadeConfirmacao) then
+    AguardandoCompra := false;
+
+  if (not RegimeVenda) or
+     (CurrentBar > BarraPullbackVenda + BarrasValidadeConfirmacao) then
+    AguardandoVenda := false;
+
+  { Libera a deteccao de um novo pullback em um candle futuro.
+    O intervalo minimo entre operacoes continua sendo respeitado. }
+  if CurrentBar > UltimaBarraEntrada then
+  begin
+    GatilhoUsadoCompra := false;
+    GatilhoUsadoVenda := false;
+  end;
+
+  { Com confirmacao ligada, a entrada ocorre quando uma das
+    barras seguintes confirma a retomada do movimento:
+    - compra ao fechar acima da maxima do pullback;
+    - venda ao fechar abaixo da minima do pullback.
+
+    Com confirmacao desligada, preserva o gatilho original. }
+  GatilhoCompra :=
+    RegimeCompra and
+    (not GatilhoUsadoCompra) and
+    (((not UsarConfirmacaoRompimento) and CandlePullbackCompra) or
+     (UsarConfirmacaoRompimento and AguardandoCompra and
+      (CurrentBar > BarraPullbackCompra) and
+      (Fechamento > NivelConfirmacaoCompra)));
+
+  GatilhoVenda :=
+    RegimeVenda and
+    (not GatilhoUsadoVenda) and
+    (((not UsarConfirmacaoRompimento) and CandlePullbackVenda) or
+     (UsarConfirmacaoRompimento and AguardandoVenda and
+      (CurrentBar > BarraPullbackVenda) and
+      (Fechamento < NivelConfirmacaoVenda)));
+
+  { =========================================================
+    Controles de operacoes e perdas
+    ========================================================= }
+  if IsBought and (not IsBought[1]) then
+  begin
+    OperacoesHoje := OperacoesHoje + 1;
+    ResultadoAntesEntrada := DailyResult(false);
+    PrecoEntradaCompra := Price;
+  end;
+
+  if IsSold and (not IsSold[1]) then
+  begin
+    OperacoesHoje := OperacoesHoje + 1;
+    ResultadoAntesEntrada := DailyResult(false);
+    PrecoEntradaVenda := Price;
+  end;
+
+  if (not IsBought) and (not IsSold) and
+     (IsBought[1] or IsSold[1]) then
+  begin
+    if DailyResult(false) < ResultadoAntesEntrada then
+      PerdasHoje := PerdasHoje + 1;
+  end;
+
+  { =========================================================
+    Saidas
+    ========================================================= }
+  if (Time >= HorarioZeragem) and (IsBought or IsSold) then
+    ClosePosition;
+
+  if IsBought and (Time < HorarioZeragem) then
+  begin
+    if IsBought[1] then
+      PrecoEntradaCompra := PrecoEntradaCompra[1];
+
+    SellToCoverLimit(PrecoEntradaCompra + AlvoCompraPontos);
+    SellToCoverStop(PrecoEntradaCompra - StopCompraPontos);
+  end;
+
+  if IsSold and (Time < HorarioZeragem) then
+  begin
+    if IsSold[1] then
+      PrecoEntradaVenda := PrecoEntradaVenda[1];
+
+    BuyToCoverLimit(PrecoEntradaVenda - AlvoVendaPontos);
+    BuyToCoverStop(PrecoEntradaVenda + StopVendaPontos);
+  end;
+
+  { =========================================================
+    Entradas
+    ========================================================= }
+  PodeAbrirPosicao :=
+    (not IsBought) and
+    (not IsSold) and
+    (Time >= HorarioInicioOperacao) and
+    (Time <= HorarioLimiteEntrada) and
+    (OperacoesHoje < MaximoOperacoesDia) and
+    (PerdasHoje < MaximoPerdasDia) and
+    ((UltimaBarraEntrada = 0) or
+     (CurrentBar >= UltimaBarraEntrada + MinimoBarrasEntreOperacoes));
+
+  EntradaCompra := PodeAbrirPosicao and GatilhoCompra;
+  EntradaVenda := PodeAbrirPosicao and GatilhoVenda;
+
+  if EntradaCompra then
+  begin
+    GatilhoUsadoCompra := true;
+    AguardandoCompra := false;
+    AguardandoVenda := false;
+    UltimaBarraEntrada := CurrentBar;
+    BuyAtMarket(QuantidadeContratos);
+  end
+  else if EntradaVenda then
+  begin
+    GatilhoUsadoVenda := true;
+    AguardandoCompra := false;
+    AguardandoVenda := false;
+    UltimaBarraEntrada := CurrentBar;
+    SellShortAtMarket(QuantidadeContratos);
+  end;
+
+  { =========================================================
+    Visual
+    ========================================================= }
+  if ExibirVWAP then
+    Plot(ValorVWAP)
+  else
+    NoPlot(1);
+
+  if ExibirMedias then
+  begin
+    Plot2(MediaRapida);
+    Plot3(MediaLenta);
+  end
+  else
+  begin
+    NoPlot(2);
+    NoPlot(3);
+  end;
+
+  if ExibirSinais and EntradaCompra then
+    PlotText("LONG", clGreen, 0, 8);
+
+  if ExibirSinais and EntradaVenda then
+    PlotText("SHORT", clRed, 2, 8);
+end;

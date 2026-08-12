@@ -1,0 +1,230 @@
+Parametro
+  QuantidadeContratos(1);
+
+  { Parametros calculados para grafico de 5 minutos }
+  BarrasDirecaoVWAP(3);
+  BarrasRetornoHora(12);
+  RetornoMinimoPercentual(0.1);
+
+  HorarioInicioOperacao(1030);
+  HorarioLimiteEntrada(1530);
+  HorarioZeragem(1555);
+
+  MaximoOperacoesDia(4);
+  MaximoPerdasDia(2);
+
+  { Premissa para 1 NQ: US$ 20 por ponto }
+  StopCompraPontos(4.0);
+  AlvoCompraPontos(2.0);
+  StopVendaPontos(4.0);
+  AlvoVendaPontos(2.5);
+
+  ExibirVWAP(true);
+  ExibirSinais(true);
+
+var
+  ValorVWAP, DistanciaAtual, DistanciaAnterior : real;
+  PrecoEntradaCompra, PrecoEntradaVenda : real;
+  ResultadoAntesEntrada : real;
+
+  RetornoHora : real;
+  RegimeCompra, RegimeVenda : boolean;
+  CandlePullbackCompra, CandlePullbackVenda : boolean;
+  GatilhoCompra, GatilhoVenda : boolean;
+  GatilhoUsadoCompra, GatilhoUsadoVenda : boolean;
+  PodeAbrirPosicao : boolean;
+
+  OperacoesHoje, PerdasHoje : integer;
+
+begin
+  { =========================================================
+    Reinicio dos controles no primeiro candle de cada dia
+    ========================================================= }
+  if (CurrentBar = 1) or (Date <> Date[1]) then
+  begin
+    OperacoesHoje := 0;
+    PerdasHoje := 0;
+    GatilhoUsadoCompra := false;
+    GatilhoUsadoVenda := false;
+    ResultadoAntesEntrada := DailyResult(false);
+  end
+  else
+  begin
+    OperacoesHoje := OperacoesHoje[1];
+    PerdasHoje := PerdasHoje[1];
+    GatilhoUsadoCompra := GatilhoUsadoCompra[1];
+    GatilhoUsadoVenda := GatilhoUsadoVenda[1];
+    ResultadoAntesEntrada := ResultadoAntesEntrada[1];
+  end;
+
+  { =========================================================
+    Indicadores
+
+    VWAP diaria padrao do Profit.
+    RetornoHora usa barras, portanto os valores padrao exigem
+    que a estrategia seja executada em grafico de 5 minutos.
+    ========================================================= }
+  ValorVWAP := VWAP(1);
+
+  if CurrentBar > BarrasRetornoHora then
+    RetornoHora :=
+      ((Fechamento / Fechamento[BarrasRetornoHora]) - 1) * 100
+  else
+    RetornoHora := 0;
+
+  RegimeCompra :=
+    (CurrentBar > BarrasRetornoHora) and
+    (CurrentBar > BarrasDirecaoVWAP) and
+    (Fechamento > ValorVWAP) and
+    (ValorVWAP > ValorVWAP[BarrasDirecaoVWAP]) and
+    (RetornoHora >= RetornoMinimoPercentual);
+
+  RegimeVenda :=
+    (CurrentBar > BarrasRetornoHora) and
+    (CurrentBar > BarrasDirecaoVWAP) and
+    (Fechamento < ValorVWAP) and
+    (ValorVWAP < ValorVWAP[BarrasDirecaoVWAP]) and
+    (RetornoHora <= -RetornoMinimoPercentual);
+
+  { =========================================================
+    Primeiro candle de pullback em direcao a VWAP
+
+    Compra:
+    - candle vermelho;
+    - permanece acima da VWAP;
+    - fechamento fica mais proximo da VWAP que o anterior.
+
+    Venda:
+    - candle verde;
+    - permanece abaixo da VWAP;
+    - fechamento fica mais proximo da VWAP que o anterior.
+    ========================================================= }
+  DistanciaAtual := Abs(Fechamento - ValorVWAP);
+  DistanciaAnterior := Abs(Fechamento[1] - ValorVWAP[1]);
+
+  CandlePullbackCompra :=
+    (Fechamento < Abertura) and
+    (Minima > ValorVWAP) and
+    (DistanciaAtual < DistanciaAnterior);
+
+  CandlePullbackVenda :=
+    (Fechamento > Abertura) and
+    (Maxima < ValorVWAP) and
+    (DistanciaAtual < DistanciaAnterior);
+
+  { Um novo ciclo somente e liberado quando o regime anterior
+    for invalidado. Isso impede varios gatilhos no mesmo movimento. }
+  if not RegimeCompra then
+    GatilhoUsadoCompra := false;
+
+  if not RegimeVenda then
+    GatilhoUsadoVenda := false;
+
+  GatilhoCompra :=
+    RegimeCompra and
+    CandlePullbackCompra and
+    (not GatilhoUsadoCompra);
+
+  GatilhoVenda :=
+    RegimeVenda and
+    CandlePullbackVenda and
+    (not GatilhoUsadoVenda);
+
+  { =========================================================
+    Contabilizacao das operacoes
+    ========================================================= }
+  if IsBought and (not IsBought[1]) then
+  begin
+    OperacoesHoje := OperacoesHoje + 1;
+    ResultadoAntesEntrada := DailyResult(false);
+    PrecoEntradaCompra := Price;
+  end;
+
+  if IsSold and (not IsSold[1]) then
+  begin
+    OperacoesHoje := OperacoesHoje + 1;
+    ResultadoAntesEntrada := DailyResult(false);
+    PrecoEntradaVenda := Price;
+  end;
+
+  { Classifica a operacao encerrada pelo resultado financeiro
+    fechado, incluindo os custos considerados pelo Profit. }
+  if (not IsBought) and (not IsSold) and
+     (IsBought[1] or IsSold[1]) then
+  begin
+    if DailyResult(false) < ResultadoAntesEntrada then
+      PerdasHoje := PerdasHoje + 1;
+  end;
+
+  { =========================================================
+    Saida obrigatoria pelo horario
+    ========================================================= }
+  if (Time >= HorarioZeragem) and (IsBought or IsSold) then
+    ClosePosition;
+
+  { =========================================================
+    Gerenciamento da compra
+    ========================================================= }
+  if IsBought and (Time < HorarioZeragem) then
+  begin
+    if IsBought[1] then
+      PrecoEntradaCompra := PrecoEntradaCompra[1];
+
+    SellToCoverLimit(PrecoEntradaCompra + AlvoCompraPontos);
+    SellToCoverStop(PrecoEntradaCompra - StopCompraPontos);
+  end;
+
+  { =========================================================
+    Gerenciamento da venda
+    ========================================================= }
+  if IsSold and (Time < HorarioZeragem) then
+  begin
+    if IsSold[1] then
+      PrecoEntradaVenda := PrecoEntradaVenda[1];
+
+    BuyToCoverLimit(PrecoEntradaVenda - AlvoVendaPontos);
+    BuyToCoverStop(PrecoEntradaVenda + StopVendaPontos);
+  end;
+
+  { =========================================================
+    Permissoes e entradas
+
+    A entrada exatamente no HorarioLimiteEntrada e permitida.
+    ========================================================= }
+  PodeAbrirPosicao :=
+    (not IsBought) and
+    (not IsSold) and
+    (Time >= HorarioInicioOperacao) and
+    (Time <= HorarioLimiteEntrada) and
+    (Time < HorarioZeragem) and
+    (OperacoesHoje < MaximoOperacoesDia) and
+    (PerdasHoje < MaximoPerdasDia);
+
+  if PodeAbrirPosicao then
+  begin
+    if GatilhoCompra then
+    begin
+      GatilhoUsadoCompra := true;
+      BuyAtMarket(QuantidadeContratos);
+    end
+    else if GatilhoVenda then
+    begin
+      GatilhoUsadoVenda := true;
+      SellShortAtMarket(QuantidadeContratos);
+    end;
+  end;
+
+  { =========================================================
+    Elementos visuais
+    ========================================================= }
+  if ExibirVWAP then
+    Plot(ValorVWAP)
+  else
+    NoPlot(1);
+
+  if ExibirSinais and GatilhoCompra then
+    PlotText("LONG", clGreen, 0, 8);
+
+  if ExibirSinais and GatilhoVenda then
+    PlotText("SHORT", clRed, 2, 8);
+end;
